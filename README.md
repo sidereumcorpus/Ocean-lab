@@ -6,15 +6,16 @@ indexed wavelength calibration, and CSV export. Demo data is always labeled simu
 
 ## Publish on GitHub Pages
 
-1. Open [Settings → Pages](https://github.com/sidereumcorpus/Ocean-lab/settings/pages).
-2. Under **Build and deployment → Source**, select **GitHub Actions**.
-3. Open [Actions](https://github.com/sidereumcorpus/Ocean-lab/actions), select
-   **Deploy Ocean Lab to GitHub Pages**, and **Run workflow** if the initial
-   push ran before Pages was configured.
-4. After successful deployment, open https://sidereumcorpus.github.io/Ocean-lab/.
+GitHub Pages is configured to deploy from the main branch root. Each push
+automatically updates https://sidereumcorpus.github.io/Ocean-lab/.
 
-The workflow checks JavaScript syntax, runs mocked OBP tests, and publishes
-only the five static web assets. No package install or build is required.
+To reproduce the configuration, open
+[Settings → Pages](https://github.com/sidereumcorpus/Ocean-lab/settings/pages),
+choose **Deploy from a branch**, select **main** and **/(root)**, then save.
+
+The separate **Verify Ocean Lab** workflow checks JavaScript syntax and runs
+mocked OBP tests. Branch-based Pages publication runs independently of these
+checks; verification is not a deployment gate. No package install or build is required.
 Alternatively, serve the root folder with any local HTTP server.
 Do not open index.html through file://: ES module loading needs an HTTP origin.
 
@@ -99,4 +100,4 @@ Hardware compatibility and real USB behavior require testing with the target mod
 - app.js — UI, acquisition controls, plotting and export
 - ocean-obp.js — reusable ES6 WebUSB driver
 - tests/obp.test.js — dependency-free protocol tests
-- .github/workflows/pages.yml — checks and Pages deployment
+- .github/workflows/pages.yml — protocol and syntax checks; Pages uses the main branch root
