@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { USB4000Spectrometer } from '../usb4000.js';
-import { OceanOBPSpectrometer } from '../ocean-obp.js';
+import { USB4000Spectrometer } from '../usb4000.js?v=audit-1';
+import { OceanOBPSpectrometer } from '../ocean-obp.js?v=audit-1';
 import { createSpectrometerForDevice, selectSpectrometer } from '../spectrometer.js';
 
 const view = bytes => new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
 
 function instrument({highSpeed=true,chunkSize=Infinity,eepromLength=17,badSync=false,
-  badEEPROM=false,badCoefficient=false,wrongTime=false,missingEP6=false,stall=false} = {}) {
+  badEEPROM=false,badCoefficient=false,wrongTime=false,missingEP6=false,stall=false,autoscale=65535} = {}) {
   const packets = new Map([[1,[]],[2,[]],[6,[]]]), writes=[], reads=[];
   const listeners = new Set();
   let integration=100000, rejectRead;
@@ -27,6 +27,7 @@ function instrument({highSpeed=true,chunkSize=Infinity,eepromLength=17,badSync=f
     async open(){this.opened=true;},
     async claimInterface(number){assert.equal(number,0);},
     async releaseInterface(){},
+    async reset(){packets.forEach(queue=>queue.splice(0));this.resetCount=(this.resetCount||0)+1;},
     async close(){this.opened=false;if(rejectRead)rejectRead(new Error('Closed'));},
     async transferOut(ep,bytes){
       assert.equal(ep,1); writes.push([...bytes]);
@@ -43,9 +44,10 @@ function instrument({highSpeed=true,chunkSize=Infinity,eepromLength=17,badSync=f
         case 0x05: {
           const slot=bytes[1], reply=new Uint8Array(eepromLength);
           reply[0]=badEEPROM?0x06:0x05;reply[1]=slot;
-          const text=['USB4TEST','350','0.5','0.0001','-1e-8'][slot];
+          const text=['USB4TEST','350','0.5','0.0001','-1e-8','0.001','1','0','0','0','0','0','0','0'][slot]||'';
           const value=badCoefficient&&slot===2?'1.2garbage':text;
-          reply.set(new TextEncoder().encode(value),2);packets.get(1).push(reply);break;
+          reply.set(new TextEncoder().encode(value),2);
+          if(slot===17)view(reply).setUint16(6,autoscale,true);packets.get(1).push(reply);break;
         }
         case 0x09: {
           if(stall) break;
@@ -107,18 +109,18 @@ test('vendor-only selection routes USB4000 to legacy and STS to OBP before comma
 test('initialization claims primary interface, sets normal mode, detects speed and reads serial',async t=>{
   const {d,writes,listeners}=await connect(t);
   assert.equal(d.connected,true);assert.equal(d.highSpeed,true);assert.equal(d.serialNumber,'USB4TEST');
-  assert.deepEqual(writes,[[1],[10,0,0],[254],[5,0]]);
+  assert.deepEqual(writes,[[1],[10,0,0],[254],[5,0],[5,17]]);
   assert.equal(listeners.size,1);
 });
 
 for(const highSpeed of [true,false]) {
   test((highSpeed?'high':'full')+'-speed spectra preserve pixel order, endian values and consume sync across frames',async t=>{
     const {d,reads,values}=await connect(t,{highSpeed,chunkSize:137});
-    for(let n=0;n<2;n++)assert.deepEqual(await d.getSpectrum(),values);
+    for(let n=0;n<2;n++)assert.deepEqual(await d.getSpectrum(),values.slice(21,3669));
     const spectral=reads.filter(r=>r.ep!==1);
     assert.equal(spectral.some(r=>r.ep===6),highSpeed);
     assert.ok(spectral.every(r=>r.length%(highSpeed?512:64)===0));
-    assert.equal(d.pixelCount,3840);
+    assert.equal(d.pixelCount,3648);
   });
 }
 
@@ -139,7 +141,7 @@ for(const eepromLength of [17,18]) {
   test('calibration accepts '+eepromLength+'-byte EEPROM replies and indexes slots 1–4',async t=>{
     const {d,writes}=await connect(t,{eepromLength});
     const wavelengths=await d.getWavelengths();
-    assert.equal(wavelengths.length,3840);assert.equal(wavelengths[0],350);
+    assert.equal(wavelengths.length,3648);assert.equal(wavelengths[0],350);
     assert.ok(Math.abs(wavelengths[100]-(350+50+1-.01))<1e-9);
     assert.deepEqual(writes.slice(-4),[[5,1],[5,2],[5,3],[5,4]]);
     const count=writes.length;await d.getWavelengths();assert.equal(writes.length,count);
@@ -169,7 +171,7 @@ test('spectrum timeout closes USB and cancels the pending read',async t=>{
 test('concurrent calls stay serialized and manual disconnect cancels the read',async t=>{
   const {d,device}=await connect(t,{stall:true});
   const pending=d.getSpectrum();
-  const rejection=assert.rejects(pending,/Closed|session closed/);
+  const rejection=assert.rejects(pending,/Closed|session closed|disconnected|session changed/);
   await new Promise(resolve=>setTimeout(resolve,5));
   const queued=d.getWavelengths();
   const queuedRejection=assert.rejects(queued,/disconnected|session changed/);
@@ -198,4 +200,71 @@ test('bad EEPROM echoes fail connection and release the device',async t=>{
   await assert.rejects(d.connect(mock.device),/does not match slot/);
   assert.equal(mock.device.opened,false);assert.equal(d.connected,false);
   assert.equal(mock.listeners.size,0);
+});
+
+test('active slicing excludes sentinel dummy/tail samples and retains optical black separately',async t=>{
+  const {d,values}=await connect(t);
+  const result=await d.getSpectrum();
+  assert.equal(result.length,3648);
+  assert.equal(result[0],values[21]);assert.equal(result[3647],values[3668]);
+  assert.deepEqual(d.lastRawSpectrum,values);
+  assert.deepEqual(d.opticalDarkPixels,values.slice(5,18));
+});
+for(const autoscale of [0,32768,65535]) {
+  test('slot 17 binary saturation gain '+autoscale+' is applied and clamped',async t=>{
+    const {d,values}=await connect(t,{autoscale});
+    const active=await d.getSpectrum(),gain=autoscale?65535/autoscale:1;
+    assert.equal(d.autoscaleLevel,autoscale||null);
+    for(let p=0;p<3648;p++)assert.equal(active[p],Math.min(65535,Math.round(values[p+21]*gain)));
+  });
+}
+test('factory calibration reads stray light and all eight nonlinearity coefficients without EEPROM writes',async t=>{
+  const {d,writes}=await connect(t);
+  const data=await d.getFactoryCalibration();
+  assert.deepEqual(data.wavelength,[350,.5,.0001,-1e-8]);assert.equal(data.strayLight,.001);
+  assert.deepEqual(data.nonlinearity,[1,0,0,0,0,0,0,0]);
+  assert.deepEqual(writes.filter(w=>w[0]===5).map(w=>w[1]),[0,17,1,2,3,4,5,6,7,8,9,10,11,12,13]);
+  data.wavelength[0]=0;assert.equal((await d.getFactoryCalibration()).wavelength[0],350);
+});
+test('a bad sync resets hardware FIFOs, clears host buffers and closes the session',async t=>{
+  const {d,device}=await connect(t,{badSync:true});
+  await assert.rejects(d.getSpectrum(),/synchronization/);
+  assert.equal(device.resetCount,1);assert.equal(d._buffers.size,0);assert.equal(device.opened,false);
+});
+test('spectrum, integration setter and EEPROM queries cannot interleave',async t=>{
+  const {d,writes,device}=await connect(t);
+  const original=device.transferIn.bind(device);
+  let release,started;
+  const ready=new Promise(resolve=>started=resolve);
+  device.transferIn=async(ep,length)=>{
+    if(ep===6){started();await new Promise(resolve=>release=resolve);}
+    return original(ep,length);
+  };
+  const scan=d.getSpectrum();await ready;
+  const boundary=writes.length;
+  const integration=d.setIntegrationTime(200000),calibration=d.getWavelengths();
+  await new Promise(resolve=>setTimeout(resolve,5));assert.equal(writes.length,boundary);
+  release();await Promise.all([scan,integration,calibration]);
+  assert.deepEqual(writes.slice(boundary,boundary+2),[[2,0x40,0x0d,3,0],[254]]);
+  assert.deepEqual(writes.slice(boundary+2),[[5,1],[5,2],[5,3],[5,4]]);
+});
+test('physical disconnect promptly rejects blocked and queued work and notifies once',async t=>{
+  const {d,device,listeners,writes}=await connect(t,{stall:true});
+  let removed=0;d.onDisconnect=()=>removed++;
+  const scan=d.getSpectrum();const scanRejected=assert.rejects(scan,/disconnected|session changed/);
+  await new Promise(resolve=>setTimeout(resolve,5));
+  const queued=d.setIntegrationTime(200000);const queuedRejected=assert.rejects(queued,/disconnected|session changed/);
+  const count=writes.length;
+  for(const listener of listeners)listener({device});
+  await Promise.all([scanRejected,queuedRejected]);
+  assert.equal(removed,1);assert.equal(d.connected,false);assert.equal(listeners.size,0);
+  assert.equal(writes.length,count);await device.close();
+});
+test('public commands are rejected while connection initialization owns endpoints',async t=>{
+  const {d,writes}=await connect(t);
+  d._connecting=true;
+  const count=writes.length;
+  await assert.rejects(d.getSpectrum(),/initializing/);
+  await assert.rejects(d.setIntegrationTime(200000),/initializing/);
+  assert.equal(d.connected,false);assert.equal(writes.length,count);d._connecting=false;
 });

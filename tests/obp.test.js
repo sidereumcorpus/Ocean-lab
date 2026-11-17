@@ -146,3 +146,22 @@ test("a timeout cancels a blocked transaction by closing USB", async () => {
   assert.equal(device.opened,false);
   assert.equal(d.connected,false);
 });
+
+
+test('late OUT completion from an old session cannot read from the reopened same USBDevice',async()=>{
+  const d=new OceanOBPSpectrometer({timeoutMs:100});
+  let finishOut,readCount=0,entered;
+  const started=new Promise(resolve=>entered=resolve);
+  const device={opened:true,
+    transferOut(ep,packet){entered();return new Promise(resolve=>finishOut=()=>resolve({status:'ok',bytesWritten:packet.length}));},
+    async transferIn(){readCount++;throw new Error('Old session read');},
+    async close(){this.opened=false;}
+  };
+  d.device=device;d._in=1;d._out=1;
+  const pending=d.getSpectrum();const rejected=assert.rejects(pending,/disconnected|session changed/);
+  await started;await d.disconnect();await rejected;
+  device.opened=true;d.device=device; // Model browser reusing USBDevice after reopen.
+  finishOut();await new Promise(resolve=>setTimeout(resolve,5));
+  assert.equal(readCount,0);assert.equal(d.connected,true);
+  await d.disconnect();
+});

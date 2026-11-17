@@ -50,6 +50,7 @@ export class OceanOBPSpectrometer {
     this.integrationTime = null;
     this.onDisconnect = null;
     this._usb = null;
+    this._sessionController = new AbortController();
     this._removed = event => {
       if (event.device !== this.device) return;
       this._invalidate();
@@ -58,7 +59,7 @@ export class OceanOBPSpectrometer {
   }
 
   get connected() {
-    return Boolean(this.device && this.device.opened && !this._closing);
+    return Boolean(this.device && this.device.opened && !this._closing && !this._connecting);
   }
 
   /** Invoke directly from a user gesture to preserve USB chooser activation. */
@@ -154,8 +155,10 @@ export class OceanOBPSpectrometer {
     }
   }
 
-  _invalidate() {
+  _invalidate(reason) {
     if (this._usb) this._usb.removeEventListener("disconnect", this._removed);
+    this._sessionController.abort(reason);
+    this._sessionController = new AbortController();
     this._generation++;
     this.device = null;
     this._rx = new Uint8Array(0);
@@ -165,10 +168,10 @@ export class OceanOBPSpectrometer {
   }
 
   /** Close immediately rather than waiting behind a possibly blocked read. */
-  async disconnect() {
+  async disconnect(reason) {
     if (this._closing) return this._closing;
     const device = this.device;
-    this._invalidate();
+    this._invalidate(reason);
     if (!device) return;
     this._closing = (async () => {
       // close releases claimed interfaces and cancels outstanding transfers.
@@ -180,14 +183,25 @@ export class OceanOBPSpectrometer {
 
   _enqueue(operation) {
     const generation = this._generation;
-    const result = this._tail.then(() => {
+    if (this._connecting) throw new Error("Device connection is still initializing.");
+    const result = this._withCancellation(this._tail.then(() => {
       if (!this.connected || generation !== this._generation) {
         throw new Error("Device disconnected or session changed.");
       }
       return operation();
-    });
+    }));
     this._tail = result.catch(() => {});
     return result;
+  }
+
+  /** Remove listeners after each transaction; a perpetual Promise.race on a
+   * session promise would retain one closure per live frame until disconnect. */
+  _withCancellation(work, signal = this._sessionController.signal) {
+    return new Promise((resolve,reject)=>{
+      const cancel=()=>reject(signal.reason instanceof Error && signal.reason.name!=='AbortError' ? signal.reason : new Error('Device disconnected or session changed.'));
+      if(signal.aborted)cancel();else signal.addEventListener('abort',cancel,{once:true});
+      Promise.resolve(work).then(resolve,reject).finally(()=>signal.removeEventListener('abort',cancel));
+    });
   }
 
   async setIntegrationTime(microseconds) {
@@ -319,10 +333,10 @@ export class OceanOBPSpectrometer {
   }
 
   /** USB packet/transfer boundaries are independent of OBP frame boundaries. */
-  async _readOBPFrame(device) {
+  async _readOBPFrame(device, generation = this._generation) {
     let expected = null;
     while (true) {
-      if (this.device !== device) throw new Error("USB session closed.");
+      if (this.device !== device || this._generation !== generation) throw new Error("USB session closed.");
       if (expected === null && this._rx.length >= 44) {
         if (this._rx[0] !== 0xc1 || this._rx[1] !== 0xc0) {
           throw new Error("Invalid OBP receive stream.");
@@ -347,7 +361,7 @@ export class OceanOBPSpectrometer {
       // A full USB packet must fit in the host's receive buffer.
       const length = Math.ceil(needed / this._packetSize) * this._packetSize;
       const result = await device.transferIn(this._in, length);
-      if (this.device !== device) throw new Error("USB session closed.");
+      if (this.device !== device || this._generation !== generation) throw new Error("USB session closed.");
       if (result.status !== "ok" || !result.data) {
         throw new Error("USB IN failed: " + result.status + ".");
       }
@@ -367,6 +381,7 @@ export class OceanOBPSpectrometer {
   async _exchange(type, payload = new Uint8Array(0), ack = false) {
     if (!this.connected) throw new Error("Spectrometer is disconnected.");
     const device = this.device;
+    const generation = this._generation;
     const id = this._sequence = (this._sequence + 1) >>> 0;
     // ACK requested is bit 2 (0x0004), not the response bit (0x0001).
     const packet = this._buildOBPPacket(type, payload, ack ? 0x0004 : 0, id);
@@ -378,10 +393,11 @@ export class OceanOBPSpectrometer {
     });
     const operation = (async () => {
       const written = await device.transferOut(this._out, packet);
+      if (this.device !== device || this._generation !== generation) throw new Error("USB session closed.");
       if (written.status !== "ok" || written.bytesWritten !== packet.length) {
         throw new Error("USB OUT failed: " + written.status + ".");
       }
-      const reply = this._parseOBPResponse(await this._readOBPFrame(device));
+      const reply = this._parseOBPResponse(await this._readOBPFrame(device,generation));
       if (reply.messageType !== type || reply.regarding !== id) {
         throw new Error("OBP response does not match request.");
       }
@@ -391,12 +407,12 @@ export class OceanOBPSpectrometer {
       return reply;
     })();
     try {
-      return await Promise.race([operation, timeout]);
+      return await this._withCancellation(Promise.race([operation, timeout]));
     } catch (error) {
       // WebUSB has no transfer AbortSignal. Closing prevents an orphaned read
       // from consuming a later response. Never automatically retry a setter.
-      if (this.device === device) {
-        try { await this.disconnect(); } catch (_) {}
+      if (this.device === device && this._generation === generation) {
+        try { await this.disconnect(error); } catch (_) {}
       }
       throw error;
     } finally {

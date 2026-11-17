@@ -1,9 +1,10 @@
+import { SpectroscopySession } from './spectroscopy.js';
 import { initializeWorkspace } from "./ui.js";
-import { selectSpectrometer } from "./spectrometer.js";
-import { DatasetPanel, downloadFile } from "./dataset-ui.js?v=calibration-1";
-import { datasetCSV } from "./datasets.js?v=calibration-1";
+import { selectSpectrometer } from "./spectrometer.js?v=audit-1";
+import { DatasetPanel, downloadFile } from "./dataset-ui.js?v=audit-1";
+import { datasetCSV } from "./datasets.js?v=audit-1";
 import { gridSignature, alignGrid } from "./calibration.js";
-import { CalibrationPanel } from "./calibration-ui.js";
+import { CalibrationPanel } from "./calibration-ui.js?v=audit-1";
 
 const $ = id => document.getElementById(id);
 const state = {
@@ -15,6 +16,24 @@ const ctx = canvas.getContext("2d");
 let plotBox = null;
 let collections;
 let calibration;
+const spectroscopySession = new SpectroscopySession();
+let displayValues = null;
+function resetSpectroscopy() {
+  spectroscopySession.clear();
+  $("spectroscopyStatus").textContent="Dark/reference cleared. Capture both again after changing exposure or spectrum mode.";
+}
+function refreshSpectroscopy() {
+  displayValues=null;
+  if (!state.frame) return;
+  try {
+    displayValues=spectroscopySession.process(state.frame,$("displayMode").value,$("opticalDark").checked);
+    const invalid=Array.from(displayValues).filter(v=>!Number.isFinite(v)).length;
+    $("spectroscopyStatus").textContent=(spectroscopySession.dark?"Dark ready. ":"Dark missing. ")+
+      (spectroscopySession.reference?"Reference ready. ":"Reference missing. ")+
+      (invalid?invalid+" invalid pixels shown as gaps.":"");
+  } catch(error) { $("spectroscopyStatus").textContent=error.message; }
+}
+
 
 function notify(message, error = false) {
   $("notice").textContent = message;
@@ -43,7 +62,7 @@ function update() {
   $('integration').max = legacy ? '65535000' : '4294967295';
   $('integration').step = legacy ? '10' : '1';
   $('deviceNote').textContent = legacy
-    ? 'USB4000: 3840 readout samples include non-active detector regions. Normal mode uses 3800–65535000 µs in 10 µs increments. No host corrections are applied.'
+    ? 'USB4000: 3840 wire samples → 3648 active pixels. Counts use factory saturation scaling. Optical black subtraction is optional. Normal mode: 3800–65535000 µs, 10 µs increments.'
     : 'Wavelengths assume a full, unbinned detector readout.';
   $("status").textContent = state.closing ? "Disconnecting…"
     : state.demo ? "Demo · simulated"
@@ -62,10 +81,14 @@ function update() {
   $("integration").disabled = state.busy || state.live || state.closing;
   $("mode").disabled = state.busy || state.live || state.closing;
   $("settings").disabled = connected || state.busy || dataBusy || state.closing;
+  for(const id of ['captureDark','captureWhite']) $(id).disabled=!connected||state.busy||state.live||state.closing||dataBusy;
+  $('opticalDark').disabled=!legacy||state.busy||state.live||state.closing;
+  if(!legacy)$('opticalDark').checked=false;
   if(collections) collections.update();
   if(calibration) calibration.update();
 }
 function clearFrame() {
+  resetSpectroscopy();
   state.frame = null;
   state.reviewing = false;
   state.wavelengths = null;
@@ -145,6 +168,7 @@ $("connect").addEventListener("click", () => run(async () => {
     state.epoch++;
     state.live = false;
     calibration.reset();
+    resetSpectroscopy();
     $("deviceInfo").textContent = "Instrument unplugged";
     notify("Instrument unplugged. Reconnect to continue.", true);
     log("USB device removed.");
@@ -183,6 +207,7 @@ $("disconnect").addEventListener("click", async () => {
   state.epoch++;
   state.demo = false;
   calibration.reset();
+  resetSpectroscopy();
   state.wavelengths=null;state.factorySignature=null;
   update();
   try {
@@ -200,7 +225,10 @@ $("disconnect").addEventListener("click", async () => {
 });
 
 async function prepare(config) {
-  if (!state.demo) await state.driver.setIntegrationTime(config.integration);
+  if (!state.demo && state.driver.integrationTime !== config.integration) {
+    resetSpectroscopy();
+    await state.driver.setIntegrationTime(config.integration);
+  }
 }
 function demoSpectrum(integration, raw) {
   const result = new Uint16Array(1024);
@@ -236,6 +264,11 @@ async function acquire(config, {reference = false} = {}) {
     ...(alignment?{factoryWavelengths:state.wavelengths.slice()}:{}),
     captureId: crypto.randomUUID(), label:config.label || "",
     intensities,
+    ...(!demo && state.driver.profile==='usb4000'?{detector:{
+      activeStart:21,rawPixelCount:3840,autoscaleLevel:state.driver.autoscaleLevel,
+      opticalDarkMean:Array.from(state.driver.opticalDarkPixels).reduce((a,b)=>a+b,0)/state.driver.opticalDarkPixels.length *
+        (state.driver.autoscaleLevel?65535/state.driver.autoscaleLevel:1)
+    }}:{}),
     wavelengths: grid,
     integration: config.integration,
     mode: !demo && state.driver.profile === 'usb4000' ? 'device-counts'
@@ -353,7 +386,9 @@ function draw() {
   const left = 65, right = 20, top = 15, bottom = 48;
   const width = w-left-right, height = h-top-bottom;
   if (width <= 0 || height <= 0) return;
-  const values = f.intensities, xValues = f.wavelengths;
+  refreshSpectroscopy();
+  const values = displayValues, xValues = f.wavelengths;
+  if(!values)return; // Never mislabel unprocessed counts as absorbance/%T.
   let xMin = 0, xMax = values.length - 1, maximum = 0;
   if (xValues) {
     xMin = Infinity; xMax = -Infinity;
@@ -362,17 +397,20 @@ function draw() {
     }
   }
   if (xMax === xMin) xMax = xMin + 1;
-  for (const value of values) maximum = Math.max(maximum, value);
-  const yMax = Math.max(100, Math.ceil(maximum * 1.08 / 100) * 100);
+  let minimum=0;
+  for (const value of values) if(Number.isFinite(value)){maximum=Math.max(maximum,value);minimum=Math.min(minimum,value);}
+  const counts=$('displayMode').value==='counts';
+  const yMin=minimum<0?minimum*1.08:0;
+  const yMax=Math.max(counts?100:1,maximum*1.08);
   const px = i => left + ((xValues ? xValues[i] : i)-xMin)/(xMax-xMin)*width;
-  const py = value => top + height - value/yMax*height;
+  const py = value => top + height - (value-yMin)/(yMax-yMin)*height;
   ctx.font = "12px system-ui"; ctx.lineWidth = 1;
   for (let n = 0; n <= 4; n++) {
     const y = top + height * n / 4;
     ctx.strokeStyle = "#344353";
     ctx.beginPath(); ctx.moveTo(left,y); ctx.lineTo(w-right,y); ctx.stroke();
     ctx.fillStyle = "#adbdcd"; ctx.textAlign = "right";
-    ctx.fillText(Math.round(yMax*(1-n/4)).toLocaleString(),left-10,y+4);
+    ctx.fillText((yMax-(yMax-yMin)*n/4).toLocaleString(undefined,{maximumFractionDigits:2}),left-10,y+4);
   }
   for (let n = 0; n <= 4; n++) {
     const x = left + width*n/4, value = xMin + (xMax-xMin)*n/4;
@@ -381,18 +419,13 @@ function draw() {
   }
   ctx.fillText(xValues ? "Wavelength (nm)" : "Detector pixel",left+width/2,h-5);
   ctx.save(); ctx.translate(14,top+height/2); ctx.rotate(-Math.PI/2);
-  ctx.fillText("Intensity (counts)",0,0); ctx.restore();
-  const gradient = ctx.createLinearGradient(0,top,0,top+height);
-  gradient.addColorStop(0,"rgba(130,213,203,.25)");
-  gradient.addColorStop(1,"rgba(130,213,203,.015)");
-  ctx.beginPath(); ctx.moveTo(px(0),py(0));
-  for (let i = 0; i < values.length; i++) ctx.lineTo(px(i),py(values[i]));
-  ctx.lineTo(px(values.length-1),py(0)); ctx.closePath();
-  ctx.fillStyle = gradient; ctx.fill();
+  ctx.fillText(counts?"Intensity (counts)":$("displayMode").value==='absorbance'?"Absorbance (AU)":"Transmittance (%)",0,0); ctx.restore();
   ctx.beginPath();
-  for (let i = 0; i < values.length; i++) {
-    if (i === 0) ctx.moveTo(px(i),py(values[i]));
-    else ctx.lineTo(px(i),py(values[i]));
+  let gap=true;
+  for (let i=0;i<values.length;i++) {
+    if(!Number.isFinite(values[i])) {gap=true;continue;}
+    if(gap)ctx.moveTo(px(i),py(values[i]));else ctx.lineTo(px(i),py(values[i]));
+    gap=false;
   }
   ctx.strokeStyle = "#82d5cb"; ctx.lineWidth = 1.7; ctx.stroke();
   plotBox = { left, width, xMin, xMax };
@@ -412,7 +445,10 @@ canvas.addEventListener("pointermove", event => {
   } else index = Math.max(0, Math.min(f.intensities.length-1, Math.round(target)));
   $("cursor").textContent = "Pixel " + index +
     (f.wavelengths ? " · " + f.wavelengths[index].toFixed(3) + " nm" : "") +
-    " · " + f.intensities[index].toLocaleString() + " counts";
+    " · " + (displayValues&&Number.isFinite(displayValues[index])
+      ? displayValues[index].toLocaleString(undefined,{maximumFractionDigits:4})+
+        ($('displayMode').value==='counts'?' counts':$('displayMode').value==='absorbance'?' AU':' %')
+      : 'invalid / reference required');
 });
 canvas.addEventListener("pointerleave", () => {
   $("cursor").textContent = "Move over the plot to inspect a sample.";
@@ -466,6 +502,20 @@ canvas.addEventListener('click',event=>{
   }}
   calibration.pickPixel(pixel,f.captureId);
 });
+for(const id of ['integration','mode']) $(id).addEventListener('input',()=>{resetSpectroscopy();draw();});
+$('opticalDark').addEventListener('change',()=>{resetSpectroscopy();draw();});
+$('displayMode').addEventListener('change',draw);
+for(const [id,kind] of [['captureDark','dark'],['captureWhite','reference']]) {
+  $(id).addEventListener('click',()=>run(async()=>{
+    const config=settings(),epoch=state.epoch;
+    await prepare(config);
+    if(epoch!==state.epoch)return;
+    const frame=await acquire(config);
+    if(!frame||epoch!==state.epoch)return;
+    spectroscopySession.capture(kind,frame,$('opticalDark').checked);
+    draw();notify(kind==='dark'?'Dark captured. Unblock the source for the reference.':'Reference captured. Insert the sample for measurement.');
+  }));
+}
 initializeWorkspace();
 update();
 draw();

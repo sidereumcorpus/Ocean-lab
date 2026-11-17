@@ -44,3 +44,15 @@ test('CSV escapes quoted names and spreadsheet formulas without altering numeric
 test('peak metadata uses the wavelength at the strongest detector sample',()=>{
   assert.deepEqual(framePeak(frame),{index:1,intensity:300,wavelength:500});
 });
+
+test('USB4000 processing metadata survives JSON and CSV and is validated',()=>{
+  const f={captureId:'audit',label:'test',timestamp:new Date().toISOString(),source:'hardware',
+    serial:'USB4',profile:'usb4000',mode:'device-counts',integration:100000,
+    intensities:new Uint16Array(3648).fill(100),wavelengths:null,
+    detector:{activeStart:21,rawPixelCount:3840,autoscaleLevel:32768,opticalDarkMean:12.5}};
+  const dataset={name:'Audit',notes:'',createdAt:new Date().toISOString()};
+  const restored=decodeBackup(encodeBackup(dataset,[f])).frames[0];
+  assert.deepEqual(restored.detector,f.detector);
+  assert.ok(datasetCSV(dataset,[f]).includes('optical_dark_mean_counts'));
+  assert.throws(()=>normalizeFrame({...f,detector:{...f.detector,activeStart:22}}),/metadata/);
+});

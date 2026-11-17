@@ -1,4 +1,4 @@
-import { OceanOBPSpectrometer } from './ocean-obp.js';
+import { OceanOBPSpectrometer } from './ocean-obp.js?v=audit-1';
 
 /**
  * USB4000 legacy USB driver (VID 2457, PID 1022).
@@ -7,14 +7,18 @@ import { OceanOBPSpectrometer } from './ocean-obp.js';
  *
  * Inherits only the session lifecycle and transaction queue from the OBP
  * driver. Every USB4000 command and response uses the legacy wire format.
- * No EEPROM writes, gain normalization, dark subtraction or nonlinearity
- * correction are performed. Values are unchanged device counts.
+ * EEPROM is read-only. Spectrum counts are saturation-normalized; optical
+ * dark subtraction is optional and performed separately without uint16 wrap.
  */
 export class USB4000Spectrometer extends OceanOBPSpectrometer {
   constructor(options = {}) {
     super(options);
     this.profile = 'usb4000';
-    this.pixelCount = 3840; // Complete wire readout, including non-active samples.
+    this.pixelCount = 3648; // 3840 wire samples; only 3648 optical active samples.
+    this.lastRawSpectrum = null;
+    this.opticalDarkPixels = null;
+    this.autoscaleLevel = null;
+    this.factoryCalibration = null;
     this.minIntegrationTime = 3800; // Normal mode; shorter exposures need shutter mode.
     this.maxIntegrationTime = 65535000;
     this.serialNumber = '';
@@ -93,10 +97,14 @@ export class USB4000Spectrometer extends OceanOBPSpectrometer {
           throw new Error('High-speed USB4000 requires bulk IN endpoint 6.');
         }
         this.integrationTime = new DataView(status.buffer, status.byteOffset).getUint32(2,true);
-        this.serialNumber = device.serialNumber || await this._readSlot(session,0);
+        this.serialNumber = await this._readSlot(session,0);
+        const saturation = await this._readSlotBytes(session,17);
+        // SeaBreeze USB4000 layout: full reply bytes 6..7, data bytes 4..5.
+        const level = new DataView(saturation.buffer,saturation.byteOffset).getUint16(6,true);
+        this.autoscaleLevel = level || null; // Unprogrammed zero means unity gain.
       });
       check();
-      this.pixelCount = 3840;
+      this.pixelCount = 3648;
       return this;
     } catch (error) {
       if (this.device === device) this._invalidate();
@@ -112,29 +120,36 @@ export class USB4000Spectrometer extends OceanOBPSpectrometer {
     }
   }
 
-  _invalidate() {
-    super._invalidate();
+  _invalidate(reason) {
+    super._invalidate(reason);
     if (this._buffers) this._buffers.clear();
     this.serialNumber = '';
     this.highSpeed = null;
+    this.lastRawSpectrum = null;
+    this.opticalDarkPixels = null;
+    this.autoscaleLevel = null;
+    this.factoryCalibration = null;
   }
 
   async _write(device, bytes) {
-    this._checkSession(device);
+    const generation=this._generation;
+    this._checkSession(device,generation);
     const result = await device.transferOut(1, bytes);
-    this._checkSession(device);
+    this._checkSession(device,generation);
     if (result.status !== 'ok' || result.bytesWritten !== bytes.length) {
       throw new Error('USB4000 command transfer failed: ' + result.status);
     }
   }
 
-  _checkSession(device) {
-    if (!device || this.device !== device || !device.opened) throw new Error('USB4000 session closed.');
+  _checkSession(device,generation=this._generation) {
+    if (device?.sessionDevice) { generation=device.generation;device=device.sessionDevice; }
+    if (generation!==this._generation || !device || this.device !== device || !device.opened) throw new Error('USB4000 session closed.');
   }
 
   /** Preserve any bytes after the requested logical unit, e.g. the sync byte. */
   async _readBytes(device, endpoint, count) {
-    this._checkSession(device);
+    const generation=this._generation;
+    this._checkSession(device,generation);
     let buffer = this._buffers.get(endpoint) || new Uint8Array(0);
     const packetSize = this._endpoints.get(endpoint);
     if (!packetSize) throw new Error('Missing USB4000 endpoint ' + endpoint);
@@ -142,7 +157,7 @@ export class USB4000Spectrometer extends OceanOBPSpectrometer {
       const needed = count - buffer.length;
       const length = Math.ceil(needed / packetSize) * packetSize;
       const result = await device.transferIn(endpoint, length);
-      this._checkSession(device);
+      this._checkSession(device,generation);
       if (result.status !== 'ok' || !result.data) {
         throw new Error('USB4000 IN endpoint ' + endpoint + ' failed: ' + result.status);
       }
@@ -167,22 +182,53 @@ export class USB4000Spectrometer extends OceanOBPSpectrometer {
     return status;
   }
 
-  async _readSlot(device,index) {
+  async _readSlotBytes(device,index) {
+    const generation=this._generation;
     await this._write(device,Uint8Array.of(0x05,index));
-    // Firmware replies are a single short USB packet, usually 17 or 18 bytes
-    // total. Do not wait for byte 18 on revisions returning only 17 bytes.
+    // A 64-byte capacity accommodates the whole EP1 short packet, including
+    // firmware revisions returning 18 rather than 17 bytes. Never issue a
+    // second read to fill a missing byte: that could consume another response.
     const result = await device.transferIn(1,64);
-    this._checkSession(device);
-    if (result.status !== 'ok' || !result.data ||
-        ![17,18].includes(result.data.byteLength)) {
+    this._checkSession(device,generation);
+    if (result.status !== 'ok' || !result.data || ![17,18].includes(result.data.byteLength)) {
       throw new Error('Invalid USB4000 EEPROM reply length/status.');
     }
-    const bytes = new Uint8Array(result.data.buffer,result.data.byteOffset,result.data.byteLength);
+    const bytes = new Uint8Array(result.data.buffer,result.data.byteOffset,result.data.byteLength).slice();
     if (bytes[0] !== 0x05 || bytes[1] !== index) {
       throw new Error('USB4000 EEPROM response does not match slot ' + index);
     }
-    const text = new TextDecoder('ascii').decode(bytes.slice(2));
-    return text.split('\0')[0].trim();
+    return bytes;
+  }
+
+  async _readSlot(device,index) {
+    const bytes = await this._readSlotBytes(device,index);
+    return new TextDecoder('ascii').decode(bytes.slice(2)).replace(/\0/g,'').trim();
+  }
+
+  async _readNumber(device,slot) {
+    const text = await this._readSlot(device,slot);
+    if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?$/.test(text) || !Number.isFinite(Number(text))) {
+      throw new Error('Invalid USB4000 coefficient in EEPROM slot ' + slot);
+    }
+    return Number(text);
+  }
+
+  /** Read diagnostic correction coefficients; no EEPROM writes or implicit
+   * stray-light/nonlinearity correction. Their units require a separate model. */
+  async getFactoryCalibration() {
+    return this._enqueue(() => this._transaction(async device => {
+      if (!this.factoryCalibration) {
+        const wavelength = [];
+        for (let slot=1;slot<=4;slot++) wavelength.push(await this._readNumber(device,slot));
+        if (wavelength.slice(1).every(v=>v===0)) throw new Error('Constant/invalid wavelength calibration.');
+        const strayLight = await this._readNumber(device,5);
+        const nonlinearity = [];
+        for (let slot=6;slot<=13;slot++) nonlinearity.push(await this._readNumber(device,slot));
+        this.factoryCalibration = {serial:this.serialNumber,wavelength,strayLight,nonlinearity,autoscaleLevel:this.autoscaleLevel};
+        this._coefficients = wavelength;
+      }
+      return structuredClone(this.factoryCalibration);
+    }));
   }
 
   async setIntegrationTime(microseconds) {
@@ -218,14 +264,28 @@ export class USB4000Spectrometer extends OceanOBPSpectrometer {
         data.set(await this._readBytes(device,2,7680));
       }
       const sync = await this._readBytes(device,2,1);
-      if (sync[0] !== 0x69) throw new Error('USB4000 spectrum synchronization failed. Reconnect.');
+      if (sync[0] !== 0x69) {
+        // No safe bounded drain exists in WebUSB (no transfer abort). Reset
+        // clears device-side FIFOs, then _transaction closes the session.
+        this._buffers.clear();
+        try { await device.reset(); } catch (_) {}
+        throw new Error('USB4000 spectrum synchronization failed; buffers flushed. Reconnect.');
+      }
       if ([...this._buffers.values()].some(bytes => bytes.length)) {
         throw new Error('Unexpected trailing USB4000 data. Reconnect.');
       }
       const result = new Uint16Array(3840), view = new DataView(data.buffer);
       for (let p = 0; p < result.length; p++) result[p] = view.getUint16(p*2,true);
-      this.pixelCount = result.length;
-      return result;
+      this.lastRawSpectrum = result;
+      // Manufacturer table is ONE-based: black 6..18, active 22..3669.
+      // Therefore JS black slice(5,18), active slice(21,3669). Index 18 is
+      // transitional, and slice(22,3670) would discard one active pixel.
+      this.opticalDarkPixels = result.slice(5,18);
+      const gain = this.autoscaleLevel ? 65535 / this.autoscaleLevel : 1;
+      const active = result.slice(21,3669);
+      for (let p=0;p<active.length;p++) active[p] = Math.min(65535,Math.round(active[p]*gain));
+      this.pixelCount = active.length;
+      return active;
     }));
   }
 
@@ -233,22 +293,13 @@ export class USB4000Spectrometer extends OceanOBPSpectrometer {
     return this._enqueue(() => this._transaction(async device => {
       if (!this._coefficients) {
         const coefficients = [];
-        for (let slot = 1; slot <= 4; slot++) {
-          const text = await this._readSlot(device,slot);
-          // Reject partial parses, erased EEPROM and non-finite values.
-          if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?$/.test(text)) {
-            throw new Error('Invalid USB4000 wavelength coefficient in EEPROM slot ' + slot);
-          }
-          const value = Number(text);
-          if (!Number.isFinite(value)) throw new Error('Non-finite wavelength calibration.');
-          coefficients.push(value);
-        }
+        for (let slot = 1; slot <= 4; slot++) coefficients.push(await this._readNumber(device,slot));
         if (coefficients.slice(1).every(value => value === 0)) {
           throw new Error('USB4000 wavelength calibration is constant/invalid.');
         }
         this._coefficients = coefficients;
       }
-      const wavelengths = new Float64Array(3840);
+      const wavelengths = new Float64Array(3648);
       for (let p = 0; p < wavelengths.length; p++) {
         const c = this._coefficients;
         wavelengths[p] = ((c[3]*p+c[2])*p+c[1])*p+c[0];
@@ -260,6 +311,7 @@ export class USB4000Spectrometer extends OceanOBPSpectrometer {
 
   async _transaction(operation) {
     const device = this.device;
+    const generation = this._generation;
     this._checkSession(device);
     let timer;
     const timeoutMs = Math.max(this.options.timeoutMs,
@@ -269,11 +321,20 @@ export class USB4000Spectrometer extends OceanOBPSpectrometer {
     });
     // Pass the captured session into every transfer to prevent late work from
     // crossing a disconnect/reconnect boundary. Never retry legacy commands.
-    const work = Promise.resolve().then(() => operation(device));
-    try { return await Promise.race([work,timeout]); }
+    const work = Promise.resolve().then(() => {
+      this._checkSession(device,generation);
+      // Carry generation across await boundaries even when reconnect returns
+      // the same USBDevice object. Helpers validate this immutable token.
+      const session={sessionDevice:device,generation,
+        transferOut:(...args)=>device.transferOut(...args),
+        transferIn:(...args)=>device.transferIn(...args),
+        reset:()=>{this._checkSession(session);return device.reset();}};
+      return operation(session);
+    });
+    try { return await this._withCancellation(Promise.race([work,timeout])); }
     catch (error) {
-      if (this.device === device) {
-        try { await this.disconnect(); } catch (_) {}
+      if (this.device === device && this._generation === generation) {
+        try { await this.disconnect(error); } catch (_) {}
       }
       throw error;
     } finally { clearTimeout(timer); }

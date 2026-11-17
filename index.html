@@ -6,8 +6,8 @@
 <meta name="theme-color" content="#111820">
 <meta name="description" content="Browser-based Ocean Optics USB4000 and OBP spectrometer dashboard.">
 <title>Ocean Lab · Spectrometer</title>
-<link rel="stylesheet" href="./style.css?v=workspace-1">
-<script type="module" src="./app.js?v=workspace-1"></script>
+<link rel="stylesheet" href="./style.css?v=audit-1">
+<script type="module" src="./app.js?v=audit-1"></script>
 </head>
 <body><main class="app-shell">
 <header class="app-header"><div class="brand"><div class="eyebrow">OCEAN LAB</div><h1>Spectrometer</h1></div><div class="device-identity"><div id="status" class="status" role="status">Disconnected</div><div id="deviceInfo" class="muted">No instrument selected</div></div>
@@ -32,6 +32,13 @@
 <div class="pane-title"><div class="eyebrow">MEASUREMENT</div><h2>Acquisition</h2></div>
 <div class="grid2"><div><label for="integration">Integration time · µs</label><input id="integration" type="number" min="1" max="4294967295" step="1" value="100000"></div>
 <div><label for="mode">Spectrum</label><select id="mode"><option value="corrected">Corrected</option><option value="raw">Raw ADC</option></select></div></div>
+<details><summary>Dark, reference & spectroscopy</summary>
+<label for="displayMode">Plot view</label><select id="displayMode"><option value="counts">Intensity counts</option><option value="transmittance">Transmittance · %</option><option value="absorbance">Absorbance · AU</option></select>
+<label class="check"><input id="opticalDark" type="checkbox" disabled> Subtract USB4000 optical black mean</label>
+<div class="buttons"><button id="captureDark" disabled>Capture dark</button><button id="captureWhite" disabled>Capture light reference</button></div>
+<p id="spectroscopyStatus" class="note" role="status">Capture dark with the light blocked, then a light reference without the sample.</p>
+<p class="note">Derived views are session-only. Save and CSV retain saturation-scaled intensity counts and optical-black metadata. Invalid ratios appear as gaps. Changing integration time or spectrum mode clears dark/reference.</p>
+</details>
 <label for="sampleLabel">Sample label · optional</label><input id="sampleLabel" maxlength="120" placeholder="e.g. Red filter · trial 1">
 <div class="option-card"><label class="check"><input id="autoSave" type="checkbox" checked> Save single captures to dataset</label>
 <label class="check"><input id="recordLive" type="checkbox"> Record live frames to dataset</label>

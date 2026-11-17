@@ -46,6 +46,15 @@ export function normalizeFrame(frame) {
     integration: frame.integration, mode:frame.mode, profile:frame.profile,
     source:frame.source, serial:text(frame.serial || '',200,'serial'), timestamp:date(frame.timestamp)
   };
+  if(frame.detector!==undefined) {
+    const d=frame.detector;
+    if(frame.profile!=='usb4000'||values.length!==3648||!d||d.activeStart!==21||d.rawPixelCount!==3840||
+      !(d.autoscaleLevel===null||Number.isInteger(d.autoscaleLevel)&&d.autoscaleLevel>0&&d.autoscaleLevel<=65535)||
+      !Number.isFinite(d.opticalDarkMean)||d.opticalDarkMean<0||d.opticalDarkMean>65535*65535) {
+      throw new Error('Invalid USB4000 detector processing metadata.');
+    }
+    normalized.detector={activeStart:21,rawPixelCount:3840,autoscaleLevel:d.autoscaleLevel,opticalDarkMean:d.opticalDarkMean};
+  }
   if(frame.calibration !== undefined) normalized.calibration=frame.calibration===null?null:validateCalibration(frame.calibration);
   if(normalized.calibration) {
     const c=normalized.calibration,base=frame.factoryWavelengths;
@@ -89,7 +98,7 @@ function csvCell(value) {
 }
 /** Long-form CSV: rows remain valid when captures have different pixel grids. */
 export function datasetCSV(dataset, frames) {
-  const rows=['dataset,capture_id,sample_label,timestamp_utc,source,profile,serial,spectrum_type,integration_us,pixel,wavelength_nm,intensity_counts,calibration_kind,calibration_id,calibration_name,offset_nm,reference_nm,reference_peak_pixel,factory_wavelength_nm'];
+  const rows=['dataset,capture_id,sample_label,timestamp_utc,source,profile,serial,spectrum_type,integration_us,pixel,wavelength_nm,intensity_counts,calibration_kind,calibration_id,calibration_name,offset_nm,reference_nm,reference_peak_pixel,factory_wavelength_nm,raw_active_start,autoscale_level,optical_dark_mean_counts'];
   for(const frame of frames) {
     const f=normalizeFrame(frame);
     for(let p=0;p<f.intensities.length;p++) rows.push([
@@ -97,7 +106,8 @@ export function datasetCSV(dataset, frames) {
       f.mode,f.integration,p,f.wavelengths?f.wavelengths[p]:'',f.intensities[p],
       f.calibration?.kind||(f.wavelengths?'factory':'none'),f.calibration?.id||'',f.calibration?.name||'',
       f.calibration?.offsetNm??'',f.calibration?.referenceNm??'',f.calibration?.peakPixel??'',
-      f.factoryWavelengths?f.factoryWavelengths[p]:f.wavelengths?f.wavelengths[p]:''
+      f.factoryWavelengths?f.factoryWavelengths[p]:f.wavelengths?f.wavelengths[p]:'',
+      f.detector?.activeStart??'',f.detector?.autoscaleLevel??'',f.detector?.opticalDarkMean??''
     ].map(csvCell).join(','));
   }
   return rows.join('\r\n');

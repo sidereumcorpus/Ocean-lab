@@ -128,7 +128,7 @@ external scripts, external fonts, server APIs, or runtime dependencies.
 
 For the silver USB4000 (VID 0x2457, PID 0x1022):
 
-1. Refresh the page to load version 1.1, then leave **Instrument profile → Auto**.
+1. Refresh the page to load version 1.5, then leave **Instrument profile → Auto**.
 2. Choose **Connect USB** and select the USB4000.
 3. Leave all endpoint fields blank; USB4000 uses its model-defined endpoint roles.
 4. Start with **100000 µs** integration and choose **Capture**.
@@ -138,28 +138,58 @@ Normal trigger mode is set at connection. Supported exposure times are
 3800–65535000 µs in 10 µs increments. Shorter shutter-mode exposures are
 not implemented. Status readback verifies each integration-time command.
 
-The full USB wire readout contains **3840 uint16 samples**, including
-non-active detector regions; the physical sensor has 3648 active elements.
-No samples are silently cropped or shifted. The calibration polynomial uses
-zero-based readout indices, and the plot and CSV use matching array indices.
-Wavelengths assigned to non-active samples are polynomial extrapolations,
-not additional usable detector area. Check the instrument's calibrated usable
-range when analyzing data.
+The full USB wire readout contains **3840 uint16 samples**. The plot and new
+captures contain **3648 active samples**, using `raw.slice(21,3669)`.
+The manufacturer table uses one-based pixel numbers: optical active 22–3669,
+optical black 6–18 (`raw.slice(5,18)`). Do not include transitional JS index 18
+in the optical-black mean or shift the active window one pixel to the right.
+The requested wavelength polynomial evaluates active indices 0–3647. Verify
+absolute wavelength agreement against a known lamp on the physical unit.
+Older 3840-sample captures remain readable, but their old alignment profiles
+cannot match the new grid; capture a new alignment profile.
 
 High-speed USB reads the first 2048 bytes on IN endpoint 6, the remaining
 5632 bytes on IN endpoint 2, then consumes and checks the 0x69 synchronization
-byte. Full-speed USB reads all 7680 bytes plus sync on IN endpoint 2.
-Commands and EEPROM replies use OUT endpoint 1 and IN endpoint 1.
+byte. Full-speed status selects all 7680 bytes plus sync on IN endpoint 2.
+Commands and EEPROM replies use OUT endpoint 1 and IN endpoint 1. A bad sync
+clears host buffers, attempts USB reset to flush device FIFOs, and closes the
+session; reconnect is required. Reset failure is followed by close, never an
+unbounded drain read or automatic command retry.
 
-EEPROM slots 1–4 provide ASCII wavelength coefficients; reads validate
-command/slot echoes and handle 17- or 18-byte firmware replies. Slot 0
-provides a serial fallback when the USB descriptor has no serial number.
+EEPROM slot 0 provides serial text; slots 1–4 provide ASCII wavelength
+coefficients. Reads validate command/slot echoes, handle 17- or 18-byte short
+replies, remove nulls, and reject partial/nonfinite coefficient parses.
+`getFactoryCalibration()` additionally reads stray light (5) and eight
+nonlinearity coefficients (6–13), without implicitly applying them.
 The driver never writes EEPROM or firmware.
 
-USB4000 output is labeled **device counts**. No software dark subtraction,
-nonlinearity correction, saturation scaling, or separate OBP corrected mode
-is implied. This protocol support has mocked tests; physical hardware
-validation is still required with your instrument and firmware.
+Slot 17 stores binary autonulling information. Its saturation uint16 is at
+**full response bytes 6–7**, little endian, not the first two data bytes.
+Active counts are scaled by 65535/level, rounded to uint16 and clamped at
+65535; an unprogrammed zero level uses unity gain. The raw 3840-sample frame
+and black samples remain accessible as `lastRawSpectrum` and
+`opticalDarkPixels`. New saved captures retain saturation level, active start
+and normalized optical-black mean in JSON and CSV processing metadata.
+
+In **Acquire → Dark, reference & spectroscopy**, capture dark with the source
+blocked and a light reference without the sample. Select Absorbance or %T.
+Derived views and optional optical-black subtraction are session-only;
+archives/exports retain normalized counts and processing metadata. Optical
+black subtraction uses floating point so negative noise does not wrap.
+Nonpositive dark-corrected sample/reference values and nonfinite results
+produce plot gaps, rather than infinities or fabricated epsilon values.
+Changing integration time or spectrum mode, connecting, or disconnecting
+clears both reference captures. Stored references also require matching
+serial, source, protocol, exposure, spectrum type and readout size.
+
+All public driver transactions are serialized. Commands are rejected during
+connection initialization, and disconnect cancels both pending and queued
+work. Generation tokens prevent old completions from using a re-opened
+USBDevice. Live acquisition awaits each scan and save before requesting the
+next scan; there is no setInterval acquisition timer.
+
+See [AUDIT.md](AUDIT.md) for findings, source details and hardware acceptance
+checks. Tests use mocked USB; physical hardware validation remains required.
 
 [USB4000 vendor data sheet](https://spectrecology.com/wp-content/uploads/2020/11/USB4000-Data-Sheet.pdf)
 
