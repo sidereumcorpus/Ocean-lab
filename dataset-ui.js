@@ -52,7 +52,9 @@ export class DatasetPanel {
       if(!this.dataset)$(id).disabled=true;
     }
     if(!this.callbacks.getFrame())$('saveFrame').disabled=true;
-    $('recordState').textContent=this.callbacks.isLive()&&$('recordLive').checked?'Recording to dataset':'Live preview is not recorded unless enabled below.';
+    $('recordState').textContent=$('recordLive').checked
+      ? this.callbacks.isLive()?'Recording to dataset':'Ready to record. Start live to collect the configured series.'
+      : 'Live mode is preview-only. Enable recording above to save a series.';
     for(const button of $('captureRows').querySelectorAll('button'))button.disabled=locked;
   }
   async action(operation) {
@@ -121,6 +123,7 @@ export class DatasetPanel {
     this.update();
   }
   bind() {
+    $('recordLive').addEventListener('change',()=>this.update());
     $('datasetSelect').addEventListener('change',()=>this.action(async()=>{
       this.activeId=$('datasetSelect').value;this.reviewedId='';await this.refresh();
     }));
