@@ -19,6 +19,38 @@ checks; verification is not a deployment gate. No package install or build is re
 Alternatively, serve the root folder with any local HTTP server.
 Do not open index.html through file://: ES module loading needs an HTTP origin.
 
+## Datasets (version 1.2)
+
+- **Device not found?** opens an in-app guide for the Windows 10 WinUSB setup,
+  using the verified USB4000 VID/PID and official Zadig download.
+- Name a dataset and add experiment notes. The active dataset stays selected
+  during acquisition. If none exists, saving creates a dated dataset.
+- Single captures save automatically by default; uncheck **Save single captures**
+  for preview-only work. Demo entry itself is not automatically saved.
+- Add a sample label before capturing. **Save current frame** also saves a
+  preview or updates the label/calibration of that same capture without duplicates.
+- Live mode is preview-only by default. Enable **Record live frames** to save
+  at the chosen interval and stop at the frame limit. Integration and storage
+  time can make the actual interval longer. Recording never queues USB requests.
+- Capture history shows source, integration and peak counts; **Review** displays
+  an archived spectrum even when disconnected. Calibration of archived captures
+  from another session is disabled; new captures return to the current instrument.
+- Loading calibration for a just-saved current capture updates that capture's
+  wavelength array. Existing other captures are never silently recalibrated.
+- **Export dataset CSV** writes long-form rows, one row per pixel per capture,
+  with source/profile/serial/settings so different grids remain unambiguous.
+- **Backup JSON** preserves notes, spectra, calibration and timestamps. **Import
+  JSON** validates the backup and adds a new dataset without replacing existing
+  collections. Imports are atomic. Up to 2000 frames per dataset and 256 MB
+  per imported backup are supported; the table shows the newest 100 captures.
+- Dataset and capture deletion require confirmation. Export a backup first.
+
+Collections use IndexedDB in the current browser/profile on this device. They
+survive page refreshes but do not sync between computers. Clearing site data or
+using private browsing can remove them; keep JSON backups for important work.
+No spectra are uploaded. Storage failures stop recording and leave the displayed
+frame available for individual CSV export.
+
 ## Use
 
 - Select **Try demo** to explore the interface without hardware.
@@ -145,6 +177,7 @@ Hardware compatibility and real USB behavior require testing with the target mod
 - ocean-obp.js — reusable ES6 OBP WebUSB driver
 - usb4000.js — legacy USB4000 driver
 - spectrometer.js — vendor-only chooser and USB4000 protocol detection
+- datasets.js / dataset-ui.js — IndexedDB collections, capture history and portable exports
 - tests/*.test.js — dependency-free protocol tests
 - .github/workflows/pages.yml — protocol and syntax checks; Pages uses the main branch root
 

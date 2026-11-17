@@ -1,13 +1,15 @@
 import { selectSpectrometer } from "./spectrometer.js";
+import { DatasetPanel } from "./dataset-ui.js";
 
 const $ = id => document.getElementById(id);
 const state = {
   driver: null, demo: false, busy: false, live: false,
-  closing: false, epoch: 0, frame: null, wavelengths: null, frames: 0
+  closing: false, epoch: 0, frame: null, wavelengths: null, frames: 0, reviewing: false
 };
 const canvas = $("plot");
 const ctx = canvas.getContext("2d");
 let plotBox = null;
+let collections;
 
 function notify(message, error = false) {
   $("notice").textContent = message;
@@ -24,6 +26,7 @@ function active() {
 }
 function update() {
   const connected = active();
+  const dataBusy = Boolean(collections?.busy);
   const legacy = connected && !state.demo && state.driver.profile === 'usb4000';
   const corrected = document.querySelector('#mode option[value="corrected"]');
   const raw = document.querySelector('#mode option[value="raw"]');
@@ -40,21 +43,24 @@ function update() {
     : state.demo ? "Demo · simulated"
     : state.driver && state.driver.connected ? "USB connected"
     : state.busy ? "Working…" : "Disconnected";
-  $("connect").disabled = connected || state.busy || state.closing ||
+  $("connect").disabled = connected || state.busy || dataBusy || state.closing ||
     !navigator.usb || !window.isSecureContext;
-  $("demo").disabled = connected || state.busy || state.closing;
+  $("demo").disabled = connected || state.busy || dataBusy || state.closing;
   $("disconnect").disabled = !connected || state.closing;
   ["capture","live","calibrate"].forEach(id => {
-    $(id).disabled = !connected || state.busy || state.live || state.closing;
+    $(id).disabled = !connected || state.busy || dataBusy || state.live || state.closing;
   });
+  if(state.reviewing) $("calibrate").disabled=true;
   $("stop").disabled = !state.live;
   $("export").disabled = !state.frame;
   $("integration").disabled = state.busy || state.live || state.closing;
   $("mode").disabled = state.busy || state.live || state.closing;
-  $("settings").disabled = connected || state.busy || state.closing;
+  $("settings").disabled = connected || state.busy || dataBusy || state.closing;
+  if(collections) collections.update();
 }
 function clearFrame() {
   state.frame = null;
+  state.reviewing = false;
   state.wavelengths = null;
   state.frames = 0;
   $("pixels").textContent = "—";
@@ -98,11 +104,12 @@ function driverOptions() {
 function settings() {
   return {
     integration: integerInput("integration", 1, 0xffffffff),
-    raw: $("mode").value === "raw"
+    raw: $("mode").value === "raw",
+    label: $("sampleLabel").value.trim()
   };
 }
 async function run(task) {
-  if (state.busy || state.closing) return;
+  if (state.busy || state.closing || collections?.busy) return;
   const epoch = state.epoch;
   state.busy = true;
   update();
@@ -207,7 +214,9 @@ async function acquire(config) {
   } else intensities = await state.driver.getSpectrum({ raw: config.raw });
   if (epoch !== state.epoch) return;
   state.frames++;
+  state.reviewing=false;
   state.frame = {
+    captureId: crypto.randomUUID(), label:config.label || "",
     intensities,
     wavelengths: state.wavelengths ? state.wavelengths.slice() : null,
     integration: config.integration,
@@ -219,12 +228,14 @@ async function acquire(config) {
     serial: demo ? "DEMO" : state.driver.serialNumber || state.driver.device.serialNumber || ""
   };
   renderFrame();
+  return state.frame;
 }
 $("capture").addEventListener("click", () => run(async () => {
   const config = settings(), epoch = state.epoch;
   await prepare(config);
   if (epoch !== state.epoch) return;
-  await acquire(config);
+  const frame=await acquire(config);
+  if(frame && $('autoSave').checked) await collections.save(frame);
   if (epoch === state.epoch && active()) {
     notify(state.demo ? "Simulated frame captured." : "Spectrum captured.");
     log("Single frame captured.");
@@ -232,20 +243,30 @@ $("capture").addEventListener("click", () => run(async () => {
 }));
 $("live").addEventListener("click", () => run(async () => {
   const config = settings(), epoch = state.epoch;
+  const recording=$('recordLive').checked;
+  const interval=recording?integerInput('recordInterval',1,3600)*1000:0;
+  const limit=recording?integerInput('recordLimit',1,2000):0;
+  const datasetId=recording?await collections.ensureActive():null;
   await prepare(config);
   if (epoch !== state.epoch) return;
   state.live = true;
   update();
   notify(state.demo ? "Live demo · simulated spectra." : "Live acquisition running.");
   log("Live acquisition started.");
-  // Serialize acquisition; the next frame only starts after this one finishes.
+  let saved=0,lastSaved=-Infinity;
+  // Acquisition and persistence are both serialized: no unsaved write backlog.
   while (state.live && epoch === state.epoch && active()) {
-    await acquire(config);
+    const frame=await acquire(config);
+    if(frame && recording && performance.now()-lastSaved>=interval) {
+      await collections.save(frame,datasetId);lastSaved=performance.now();saved++;
+      $('saveStatus').textContent='Recording '+saved+' / '+limit+' frames saved';
+      if(saved>=limit)state.live=false;
+    }
     await new Promise(resolve => setTimeout(resolve, 60));
   }
   state.live = false;
   if (epoch === state.epoch) {
-    notify("Live acquisition stopped.");
+    notify(recording ? "Recording stopped. " + saved + " frames saved to dataset." : "Live acquisition stopped.");
     log("Live acquisition stopped.");
   }
 }));
@@ -276,6 +297,10 @@ $("calibrate").addEventListener("click", () => run(async () => {
   }
   state.wavelengths = wavelengths;
   state.frame.wavelengths = wavelengths.slice();
+  // Updating the same capture adds its calibration without duplicating a row.
+  if(collections.ready && collections.frames.some(f=>f.captureId===state.frame.captureId)) {
+    await collections.save(state.frame);
+  }
   renderFrame();
   notify(state.demo ? "Simulated wavelength axis loaded."
     : "Wavelength coefficients loaded from the instrument.");
@@ -294,7 +319,8 @@ function renderFrame() {
   $("position").textContent = f.wavelengths
     ? f.wavelengths[peakIndex].toFixed(2) + " nm" : "px " + peakIndex;
   $("legend").textContent = (f.source === "simulated" ? "SIMULATED · " : "") + f.mode;
-  $("frameInfo").textContent = "Frame " + state.frames + " · " +
+  $("frameInfo").textContent = (state.reviewing ? "Saved capture" : "Frame " + state.frames) +
+    (f.label ? " · " + f.label : "") + " · " +
     f.integration.toLocaleString() + " µs · " + new Date(f.timestamp).toLocaleTimeString();
   draw();
 }
@@ -411,6 +437,19 @@ $("clearLog").addEventListener("click", () => { $("log").textContent = ""; });
 if (!navigator.usb || !window.isSecureContext) {
   notify("USB acquisition needs a WebUSB-capable browser over HTTPS or localhost. Demo mode is available.");
 }
+$('deviceHelp').addEventListener('click',()=>$('helpDialog').showModal());
+$('closeHelp').addEventListener('click',()=>$('helpDialog').close());
+collections=new DatasetPanel({
+  getFrame:()=>state.frame,
+  canEdit:()=>!state.busy&&!state.live&&!state.closing,
+  isLive:()=>state.live,
+  review:frame=>{
+    state.frame=frame;state.reviewing=true;$('sampleLabel').value=frame.label||'';
+    renderFrame();notify('Reviewing a saved capture. Capture a new frame to return to acquisition.');update();
+  },
+  update,notify,log
+});
 update();
 draw();
+collections.init();
 

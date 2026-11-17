@@ -7,7 +7,7 @@
 <meta name="description" content="Browser-based Ocean Optics USB4000 and OBP spectrometer dashboard.">
 <title>Ocean Lab · Spectrometer</title>
 <link rel="stylesheet" href="./style.css">
-<script type="module" src="./app.js?v=usb4000-1"></script>
+<script type="module" src="./app.js?v=datasets-1"></script>
 </head>
 <body>
 <main>
@@ -20,6 +20,7 @@
 <section class="panel"><h2>01 · Connection</h2><p class="muted">Ocean Optics / Ocean Insight</p>
 <div id="deviceInfo" class="muted">No instrument selected</div>
 <div class="buttons"><button id="connect" class="primary">Connect USB</button><button id="demo">Try demo</button><button id="disconnect" class="danger" disabled>Disconnect</button></div>
+<button id="deviceHelp" class="text-button" aria-haspopup="dialog">Device not found?</button>
 <details><summary>USB & protocol settings</summary>
 <p class="note">Auto detects USB4000 by its USB ID. OBP settings apply only to OBP instruments; USB4000 endpoint roles are automatic.</p>
 <fieldset id="settings">
@@ -40,11 +41,20 @@
 <section class="panel"><h2>02 · Acquisition</h2>
 <label for="integration">Integration time · microseconds</label><input id="integration" type="number" min="1" max="4294967295" step="1" value="100000">
 <label for="mode">Spectrum</label><select id="mode"><option value="corrected">Corrected</option><option value="raw">Raw ADC</option></select>
+<label for="sampleLabel">Sample label · optional</label><input id="sampleLabel" maxlength="120" placeholder="e.g. Red filter · trial 1">
 <div class="buttons"><button id="capture" class="primary" disabled>Capture</button><button id="live" disabled>Start live</button><button id="stop" disabled>Stop</button></div>
 <div class="buttons"><button id="calibrate" disabled>Load wavelengths</button><button id="export" disabled>Export CSV</button></div>
 <p class="note">Stop finishes the current frame. Disconnect closes USB immediately.</p><p id="deviceNote" class="note">Wavelengths assume a full, unbinned detector readout.</p>
 </section>
-</aside>
+<section class="panel"><h2>03 · Collection settings</h2>
+<label class="check"><input id="autoSave" type="checkbox" checked> Save single captures to dataset</label>
+<label class="check"><input id="recordLive" type="checkbox"> Record live frames to dataset</label>
+<div class="grid2"><div><label for="recordInterval">Save interval · seconds</label><input id="recordInterval" type="number" min="1" max="3600" step="1" value="1"></div>
+<div><label for="recordLimit">Frames per recording</label><input id="recordLimit" type="number" min="1" max="2000" step="1" value="30"></div></div>
+<p id="recordState" class="note">Live preview is not recorded unless enabled below.</p>
+<p class="note">With recording enabled, Start live saves at the chosen interval and stops at the frame limit. Long exposures determine the actual interval.</p>
+<small id="saveStatus" role="status"></small>
+</section></aside>
 <div>
 <section class="panel">
 <div class="plot-head"><div><div class="eyebrow">SPECTRAL RESPONSE</div><h2>Intensity distribution</h2></div><div id="legend" class="legend">Awaiting acquisition</div></div>
@@ -54,10 +64,33 @@
 <div class="metrics"><div class="metric"><span>PIXELS</span><strong id="pixels">—</strong></div><div class="metric"><span>PEAK COUNTS</span><strong id="peak">—</strong></div><div class="metric"><span>PEAK POSITION</span><strong id="position">—</strong></div></div>
 <small id="frameInfo">No frame captured</small>
 </section>
+<section class="panel activity" aria-labelledby="datasetsHeading">
+<div class="plot-head"><div><div class="eyebrow">SAVED MEASUREMENTS</div><h2 id="datasetsHeading">Datasets</h2></div><button id="saveFrame" disabled>Save current frame</button></div>
+<label for="datasetSelect">Active dataset</label><select id="datasetSelect" disabled><option value="">Loading datasets…</option></select>
+<div class="new-dataset"><div><label for="datasetName">New dataset name</label><input id="datasetName" maxlength="120" placeholder="e.g. Filter transmission lab"></div><button id="createDataset" disabled>Create dataset</button></div>
+<details><summary>Dataset name & notes</summary><label for="datasetTitle">Dataset name</label><input id="datasetTitle" maxlength="120"><label for="datasetNotes">Experiment notes</label><textarea id="datasetNotes" rows="3" maxlength="10000" placeholder="Light source, sample, setup, observations…"></textarea><div class="buttons"><button id="saveDatasetDetails" disabled>Save details</button><button id="deleteDataset" class="danger" disabled>Delete dataset</button></div></details>
+<p id="datasetSummary" class="note">Loading…</p>
+<div class="table-wrap"><table><thead><tr><th>Capture</th><th>Source</th><th>Integration</th><th>Peak counts</th><th>Actions</th></tr></thead><tbody id="captureRows"><tr><td colspan="5">No saved captures yet.</td></tr></tbody></table></div>
+<small id="historyNote"></small>
+<div class="buttons"><button id="exportDataset" disabled>Export dataset CSV</button><button id="backupDataset" disabled>Backup JSON</button><button id="importDataset" disabled>Import JSON</button><input id="importFile" type="file" accept=".json,application/json" hidden></div>
+<p id="storageStatus" class="note">Opening local dataset storage…</p>
+</section>
 <section class="panel activity"><div class="plot-head"><h2>Session activity</h2><button id="clearLog">Clear</button></div><pre id="log" aria-live="off">Ready.</pre></section>
 </div></div>
 <footer>Client-side acquisition · No external dependencies · Demo data is simulated · Hardware profile must match instrument firmware</footer>
 </main>
+<dialog id="helpDialog" aria-labelledby="helpTitle">
+<div class="plot-head"><h2 id="helpTitle">Device not found?</h2><button id="closeHelp" aria-label="Close device help">Close</button></div>
+<p>For your <strong>Ocean Optics USB4000</strong>, Windows must use WinUSB to connect through this app.</p>
+<ol><li>Connect the USB4000 directly to your computer and close OceanView, SpectraSuite, and other tabs using it.</li>
+<li>Open Windows Device Manager → USB4000 → Properties → Details → Hardware Ids. Confirm <strong>VID_2457 & PID_1022</strong>.</li>
+<li>Download <a href="https://zadig.akeo.ie/" target="_blank" rel="noopener noreferrer">Zadig from its official website</a> and run it as administrator.</li>
+<li>Select <strong>Options → List All Devices</strong>, choose <strong>Ocean Optics USB4000</strong>, and verify USB ID <strong>2457 1022</strong>.</li>
+<li>Choose <strong>WinUSB</strong> as the target driver, then <strong>Install Driver</strong> or <strong>Replace Driver</strong>. Change only the USB4000's driver.</li>
+<li>Unplug and reconnect it. Open this page in Chrome or Edge, leave the profile on <strong>Auto</strong>, then click <strong>Connect USB</strong>.</li></ol>
+<p class="note">Changing this driver can affect Ocean Optics desktop software on this computer. It does not change the instrument or another computer.</p>
+<details><summary>Still having trouble?</summary><ul><li>Use the HTTPS page, not a downloaded file opened with file://.</li><li>Try another USB cable or port. Check Device Manager for an error code.</li><li>If claiming the interface fails, close other software using the device, reconnect, and try again.</li><li>WinUSB and the USB4000 legacy profile are both required. OBP command fields cannot configure a USB4000.</li></ul></details>
+</dialog>
 </body>
 </html>
 
