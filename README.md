@@ -19,6 +19,47 @@ checks; verification is not a deployment gate. No package install or build is re
 Alternatively, serve the root folder with any local HTTP server.
 Do not open index.html through file://: ES module loading needs an HTTP origin.
 
+## Single-line wavelength alignment (version 1.3)
+
+1. Connect your spectrometer and illuminate it with an isolated spectral line
+   whose wavelength is known accurately. Set a nonsaturating integration time.
+2. Choose **Capture reference**. This reads the factory grid and acquires a
+   reference spectrum without automatically adding it to a dataset.
+3. Enter the **Known line wavelength** in nm. Click the intended peak on the
+   plot, or enter its approximate zero-based detector pixel. The search radius
+   limits detection to that neighborhood rather than choosing another source line.
+4. Choose **Preview alignment**. The app reports fractional peak position,
+   factory wavelength, known/aligned wavelength, and proposed offset.
+5. Name the profile and choose **Save & use for new captures**. New captures
+   use factory wavelength + offset at each pixel; intensities are never resampled.
+6. **Use factory calibration** disables alignment for subsequent captures.
+
+The peak center uses three-point parabolic interpolation around the selected
+local maximum. Saturated, flat and search-boundary peaks are rejected. This is
+an offset-only alignment: one line does not determine wavelength scale or
+curvature. Multiple known lines would be required for polynomial recalibration.
+Displayed fractional digits do not establish measurement accuracy.
+
+Profiles are stored locally and tied to serial number, hardware/demo source,
+instrument protocol, readout size and SHA-256 signature of the factory grid.
+An instrument with no serial can preview an offset but cannot save/apply a
+persistent profile. After reconnecting, load factory wavelengths (or capture a
+reference), then choose a matching saved profile explicitly. Profiles are not
+silently enabled at connection. Demo profiles can never align hardware data.
+
+A newly captured spectrum stores a full snapshot of its active calibration,
+along with the untouched factory wavelength grid and the aligned wavelength
+array. Dataset and individual CSV exports carry calibration ID/name, offset,
+reference wavelength, peak pixel and factory wavelength; JSON backups preserve
+the full profile snapshot. Importing a dataset does not install or activate
+its calibration profiles. Existing version-1 dataset backups still load.
+
+**Existing measurements are not rewritten** when a profile changes. Loading
+factory wavelengths now prepares the axis for NEW captures; capture again to
+use it. The previous behavior of attaching calibration to an already-saved
+capture has been removed. Reference runs never write factory coefficients,
+EEPROM or firmware. IndexedDB upgrades preserve existing datasets and frames.
+
 ## Datasets (version 1.2)
 
 - **Device not found?** opens an in-app guide for the Windows 10 WinUSB setup,
@@ -35,8 +76,8 @@ Do not open index.html through file://: ES module loading needs an HTTP origin.
 - Capture history shows source, integration and peak counts; **Review** displays
   an archived spectrum even when disconnected. Calibration of archived captures
   from another session is disabled; new captures return to the current instrument.
-- Loading calibration for a just-saved current capture updates that capture's
-  wavelength array. Existing other captures are never silently recalibrated.
+- Loading factory wavelengths or switching alignment prepares NEW captures.
+  Previously saved spectra retain their original wavelength axis and metadata.
 - **Export dataset CSV** writes long-form rows, one row per pixel per capture,
   with source/profile/serial/settings so different grids remain unambiguous.
 - **Backup JSON** preserves notes, spectra, calibration and timestamps. **Import
@@ -178,6 +219,7 @@ Hardware compatibility and real USB behavior require testing with the target mod
 - usb4000.js — legacy USB4000 driver
 - spectrometer.js — vendor-only chooser and USB4000 protocol detection
 - datasets.js / dataset-ui.js — IndexedDB collections, capture history and portable exports
+- calibration.js / calibration-ui.js — single-line peak alignment and persistent calibration profiles
 - tests/*.test.js — dependency-free protocol tests
 - .github/workflows/pages.yml — protocol and syntax checks; Pages uses the main branch root
 

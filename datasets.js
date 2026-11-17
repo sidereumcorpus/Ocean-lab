@@ -1,3 +1,4 @@
+import { validateCalibration } from './calibration.js';
 /** Local, dependency-free dataset storage and portable file formats. */
 export const MAX_FRAMES = 2000;
 const MAX_PIXELS = 32768;
@@ -37,7 +38,7 @@ export function normalizeFrame(frame) {
   if ((frame.source === 'simulated') !== (frame.profile === 'demo')) {
     throw new Error('Simulated data must retain its demo profile.');
   }
-  return {
+  const normalized = {
     captureId: typeof frame.captureId === 'string' && /^[a-zA-Z0-9-]{1,80}$/.test(frame.captureId)
       ? frame.captureId : uuid(),
     label: text(frame.label || '',120,'sample label'),
@@ -45,6 +46,18 @@ export function normalizeFrame(frame) {
     integration: frame.integration, mode:frame.mode, profile:frame.profile,
     source:frame.source, serial:text(frame.serial || '',200,'serial'), timestamp:date(frame.timestamp)
   };
+  if(frame.calibration !== undefined) normalized.calibration=frame.calibration===null?null:validateCalibration(frame.calibration);
+  if(normalized.calibration) {
+    const c=normalized.calibration,base=frame.factoryWavelengths;
+    if(!wavelengths || !(Array.isArray(base)||base instanceof Float64Array) || base.length!==values.length ||
+      c.pixelCount!==values.length || c.serial!==normalized.serial || c.source!==normalized.source ||
+      c.deviceProfile!==normalized.profile || Array.from(base).some((v,i)=>
+        typeof v!=='number'||!Number.isFinite(v)||Math.abs(wavelengths[i]-(v+c.offsetNm))>1e-7)) {
+      throw new Error('Calibration provenance does not match the saved spectrum.');
+    }
+    normalized.factoryWavelengths=Float64Array.from(base);
+  }
+  return normalized;
 }
 export function framePeak(frame) {
   let index = 0;
@@ -55,7 +68,8 @@ export function encodeBackup(dataset, frames) {
   return JSON.stringify({format:'ocean-lab-dataset',version:1,
     dataset:{name:dataset.name,notes:dataset.notes,createdAt:dataset.createdAt},
     frames:frames.map(f => {const v=normalizeFrame(f);return {...v,
-      intensities:Array.from(v.intensities),wavelengths:v.wavelengths?Array.from(v.wavelengths):null};})});
+      intensities:Array.from(v.intensities),wavelengths:v.wavelengths?Array.from(v.wavelengths):null,
+      ...(v.factoryWavelengths?{factoryWavelengths:Array.from(v.factoryWavelengths)}:{})};})});
 }
 export function decodeBackup(input) {
   const data = typeof input === 'string' ? JSON.parse(input) : input;
@@ -75,12 +89,15 @@ function csvCell(value) {
 }
 /** Long-form CSV: rows remain valid when captures have different pixel grids. */
 export function datasetCSV(dataset, frames) {
-  const rows=['dataset,capture_id,sample_label,timestamp_utc,source,profile,serial,spectrum_type,integration_us,pixel,wavelength_nm,intensity_counts'];
+  const rows=['dataset,capture_id,sample_label,timestamp_utc,source,profile,serial,spectrum_type,integration_us,pixel,wavelength_nm,intensity_counts,calibration_kind,calibration_id,calibration_name,offset_nm,reference_nm,reference_peak_pixel,factory_wavelength_nm'];
   for(const frame of frames) {
     const f=normalizeFrame(frame);
     for(let p=0;p<f.intensities.length;p++) rows.push([
       dataset.name,f.captureId,f.label,f.timestamp,f.source,f.profile,f.serial,
-      f.mode,f.integration,p,f.wavelengths?f.wavelengths[p]:'',f.intensities[p]
+      f.mode,f.integration,p,f.wavelengths?f.wavelengths[p]:'',f.intensities[p],
+      f.calibration?.kind||(f.wavelengths?'factory':'none'),f.calibration?.id||'',f.calibration?.name||'',
+      f.calibration?.offsetNm??'',f.calibration?.referenceNm??'',f.calibration?.peakPixel??'',
+      f.factoryWavelengths?f.factoryWavelengths[p]:f.wavelengths?f.wavelengths[p]:''
     ].map(csvCell).join(','));
   }
   return rows.join('\r\n');
@@ -92,12 +109,15 @@ export class DatasetStore {
     if(this.db)return this;
     if(typeof indexedDB === 'undefined')throw new Error('Local dataset storage is unavailable in this browser.');
     this.db=await new Promise((resolve,reject)=>{
-      const request=indexedDB.open('ocean-lab-datasets',1);
+      const request=indexedDB.open('ocean-lab-datasets',2);
       request.onupgradeneeded=()=>{
         const db=request.result;
-        db.createObjectStore('datasets',{keyPath:'id'});
-        const frames=db.createObjectStore('frames',{keyPath:'id'});
-        frames.createIndex('datasetId','datasetId',{unique:false});
+        if(!db.objectStoreNames.contains('datasets'))db.createObjectStore('datasets',{keyPath:'id'});
+        if(!db.objectStoreNames.contains('frames')) {
+          const frames=db.createObjectStore('frames',{keyPath:'id'});
+          frames.createIndex('datasetId','datasetId',{unique:false});
+        }
+        if(!db.objectStoreNames.contains('calibrations'))db.createObjectStore('calibrations',{keyPath:'id'});
       };
       request.onsuccess=()=>resolve(request.result);
       request.onerror=()=>reject(request.error);
@@ -115,6 +135,17 @@ export class DatasetStore {
       tx.onabort=()=>reject(tx.error || new Error('Dataset operation was cancelled.'));
       tx.onerror=()=>{}; // onabort reports failures after rollback.
       try{body(tx,value=>{result=value;});}catch(error){tx.abort();reject(error);}
+    });
+  }
+  async listCalibrations() {
+    return this._tx(['calibrations'],'readonly',(tx,done)=>{
+      tx.objectStore('calibrations').getAll().onsuccess=e=>done(e.target.result);
+    });
+  }
+  async saveCalibration(profile) {
+    const clean=validateCalibration(profile);
+    return this._tx(['calibrations'],'readwrite',(tx,done)=>{
+      tx.objectStore('calibrations').put(clean);done(clean);
     });
   }
   async list() {

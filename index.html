@@ -6,8 +6,8 @@
 <meta name="theme-color" content="#111820">
 <meta name="description" content="Browser-based Ocean Optics USB4000 and OBP spectrometer dashboard.">
 <title>Ocean Lab · Spectrometer</title>
-<link rel="stylesheet" href="./style.css?v=datasets-1">
-<script type="module" src="./app.js?v=datasets-1"></script>
+<link rel="stylesheet" href="./style.css?v=calibration-1">
+<script type="module" src="./app.js?v=calibration-1"></script>
 </head>
 <body>
 <main>
@@ -43,7 +43,7 @@
 <label for="mode">Spectrum</label><select id="mode"><option value="corrected">Corrected</option><option value="raw">Raw ADC</option></select>
 <label for="sampleLabel">Sample label · optional</label><input id="sampleLabel" maxlength="120" placeholder="e.g. Red filter · trial 1">
 <div class="buttons"><button id="capture" class="primary" disabled>Capture</button><button id="live" disabled>Start live</button><button id="stop" disabled>Stop</button></div>
-<div class="buttons"><button id="calibrate" disabled>Load wavelengths</button><button id="export" disabled>Export CSV</button></div>
+<div class="buttons"><button id="calibrate" disabled>Load factory wavelengths</button><button id="export" disabled>Export CSV</button></div>
 <p class="note">Stop finishes the current frame. Disconnect closes USB immediately.</p><p id="deviceNote" class="note">Wavelengths assume a full, unbinned detector readout.</p>
 </section>
 <section class="panel"><h2>03 · Collection settings</h2>
@@ -63,6 +63,24 @@
 <div id="cursor">Move over the plot to inspect a sample.</div>
 <div class="metrics"><div class="metric"><span>PIXELS</span><strong id="pixels">—</strong></div><div class="metric"><span>PEAK COUNTS</span><strong id="peak">—</strong></div><div class="metric"><span>PEAK POSITION</span><strong id="position">—</strong></div></div>
 <small id="frameInfo">No frame captured</small>
+</section>
+<section class="panel activity" aria-labelledby="alignmentHeading">
+<div class="eyebrow">WAVELENGTH CALIBRATION</div><h2 id="alignmentHeading">Single-line alignment</h2>
+<p class="note">Use an isolated emission line with a precisely known wavelength. One line corrects an offset only; it cannot correct wavelength spacing or curvature. Intensity samples stay unchanged.</p>
+<div class="buttons"><button id="captureReference" disabled>Capture reference</button><button id="showReference" disabled>Show reference</button></div>
+<p class="note">Reference capture uses the integration time above and factory wavelengths. It is not automatically saved to a dataset. Click your line on the plot or enter its pixel below.</p>
+<div class="calibration-fields"><div><label for="referenceNm">Known line wavelength · nm</label><input id="referenceNm" type="number" min="0.001" max="100000" step="any" placeholder="e.g. 546.074"></div>
+<div><label for="peakSeed">Peak near pixel</label><input id="peakSeed" type="number" min="0" step="1" placeholder="Select on plot"></div>
+<div><label for="peakRadius">Search radius · pixels</label><input id="peakRadius" type="number" min="2" max="100" step="1" value="12"></div></div>
+<div class="buttons"><button id="previewAlignment" disabled>Preview alignment</button></div>
+<div id="alignmentPreview" class="note" aria-live="polite">Capture an isolated reference line to start.</div>
+<label for="alignmentName">Calibration profile name</label><input id="alignmentName" maxlength="120" placeholder="e.g. Mercury lamp · November">
+<div class="buttons"><button id="saveAlignment" disabled>Save & use for new captures</button></div>
+<p id="alignmentIdentity" class="note"></p>
+<label for="alignmentProfiles">Saved profiles matching this instrument</label><select id="alignmentProfiles"><option value="">Choose matching profile</option></select>
+<div class="buttons"><button id="applyAlignment" disabled>Use selected profile</button><button id="factoryAlignment" disabled>Use factory calibration</button></div>
+<p id="alignmentStatus" class="calibration-status" role="status">Next captures: factory wavelengths (no alignment offset).</p>
+<p class="note">Profiles stay on this browser and require a matching serial number, readout size and factory wavelength grid. Demo profiles cannot be applied to hardware. Existing datasets and device EEPROM are never recalibrated by these controls. Fractional peak digits do not indicate absolute calibration accuracy.</p>
 </section>
 <section class="panel activity" aria-labelledby="datasetsHeading">
 <div class="plot-head"><div><div class="eyebrow">SAVED MEASUREMENTS</div><h2 id="datasetsHeading">Datasets</h2></div><button id="saveFrame" disabled>Save current frame</button></div>

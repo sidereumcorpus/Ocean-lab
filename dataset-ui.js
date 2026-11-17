@@ -1,4 +1,4 @@
-import { DatasetStore, MAX_FRAMES, framePeak, encodeBackup, decodeBackup, datasetCSV } from './datasets.js';
+import { DatasetStore, MAX_FRAMES, framePeak, encodeBackup, decodeBackup, datasetCSV } from './datasets.js?v=calibration-1';
 const $=id=>document.getElementById(id);
 export function downloadFile(name,content,type) {
   const url=URL.createObjectURL(new Blob([content],{type}));
@@ -102,7 +102,7 @@ export class DatasetPanel {
       const peak=framePeak(frame);
       const cells=[frame.label||new Date(frame.timestamp).toLocaleTimeString(),
         frame.source==='simulated'?'SIMULATED':frame.profile.toUpperCase(),
-        frame.integration.toLocaleString()+' µs',
+        frame.integration.toLocaleString()+' µs'+(frame.calibration?' · aligned':''),
         peak.intensity.toLocaleString()+(peak.wavelength===null?'':' @ '+peak.wavelength.toFixed(2)+' nm')];
       for(const value of cells){const td=document.createElement('td');td.textContent=value;tr.append(td);}
       const actions=document.createElement('td');

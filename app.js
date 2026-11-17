@@ -1,15 +1,19 @@
 import { selectSpectrometer } from "./spectrometer.js";
-import { DatasetPanel } from "./dataset-ui.js";
+import { DatasetPanel, downloadFile } from "./dataset-ui.js?v=calibration-1";
+import { datasetCSV } from "./datasets.js?v=calibration-1";
+import { gridSignature, alignGrid } from "./calibration.js";
+import { CalibrationPanel } from "./calibration-ui.js";
 
 const $ = id => document.getElementById(id);
 const state = {
   driver: null, demo: false, busy: false, live: false,
-  closing: false, epoch: 0, frame: null, wavelengths: null, frames: 0, reviewing: false
+  closing: false, epoch: 0, frame: null, wavelengths: null, frames: 0, reviewing: false, factorySignature: null
 };
 const canvas = $("plot");
 const ctx = canvas.getContext("2d");
 let plotBox = null;
 let collections;
+let calibration;
 
 function notify(message, error = false) {
   $("notice").textContent = message;
@@ -57,11 +61,14 @@ function update() {
   $("mode").disabled = state.busy || state.live || state.closing;
   $("settings").disabled = connected || state.busy || dataBusy || state.closing;
   if(collections) collections.update();
+  if(calibration) calibration.update();
 }
 function clearFrame() {
   state.frame = null;
   state.reviewing = false;
   state.wavelengths = null;
+  state.factorySignature=null;
+  if(calibration)calibration.reset();
   state.frames = 0;
   $("pixels").textContent = "—";
   $("peak").textContent = "—";
@@ -135,6 +142,7 @@ $("connect").addEventListener("click", () => run(async () => {
   driver.onDisconnect = () => {
     state.epoch++;
     state.live = false;
+    calibration.reset();
     $("deviceInfo").textContent = "Instrument unplugged";
     notify("Instrument unplugged. Reconnect to continue.", true);
     log("USB device removed.");
@@ -172,6 +180,8 @@ $("disconnect").addEventListener("click", async () => {
   state.live = false;
   state.epoch++;
   state.demo = false;
+  calibration.reset();
+  state.wavelengths=null;state.factorySignature=null;
   update();
   try {
     if (state.driver) await state.driver.disconnect();
@@ -205,7 +215,7 @@ function demoSpectrum(integration, raw) {
   }
   return result;
 }
-async function acquire(config) {
+async function acquire(config, {reference = false} = {}) {
   const epoch = state.epoch, demo = state.demo;
   let intensities;
   if (demo) {
@@ -215,10 +225,16 @@ async function acquire(config) {
   if (epoch !== state.epoch) return;
   state.frames++;
   state.reviewing=false;
+  const context=calibrationContext();
+  const alignment=!reference && calibration.active ? {...calibration.active} : null;
+  const grid=state.wavelengths ? alignment
+    ? alignGrid(state.wavelengths,alignment,context) : state.wavelengths.slice() : null;
   state.frame = {
+    calibration:alignment,
+    ...(alignment?{factoryWavelengths:state.wavelengths.slice()}:{}),
     captureId: crypto.randomUUID(), label:config.label || "",
     intensities,
-    wavelengths: state.wavelengths ? state.wavelengths.slice() : null,
+    wavelengths: grid,
     integration: config.integration,
     mode: !demo && state.driver.profile === 'usb4000' ? 'device-counts'
       : config.raw ? "raw" : "corrected",
@@ -275,36 +291,28 @@ $("stop").addEventListener("click", () => {
   notify("Stopping after the current frame…");
   update();
 });
-$("calibrate").addEventListener("click", () => run(async () => {
-  const epoch = state.epoch;
-  if (!state.frame) {
-    const config = settings();
-    await prepare(config);
-    if (epoch !== state.epoch) return;
-    await acquire(config);
-    if (epoch !== state.epoch) return;
-  }
-  let wavelengths;
-  if (state.demo) {
-    wavelengths = Float64Array.from(
-      { length: state.frame.intensities.length },
-      (_, i) => 350 + i * 450 / (state.frame.intensities.length - 1)
-    );
-  } else wavelengths = await state.driver.getWavelengths();
-  if (epoch !== state.epoch) return;
-  if (wavelengths.length !== state.frame.intensities.length) {
-    throw new Error("Wavelength and intensity lengths differ.");
-  }
-  state.wavelengths = wavelengths;
-  state.frame.wavelengths = wavelengths.slice();
-  // Updating the same capture adds its calibration without duplicating a row.
-  if(collections.ready && collections.frames.some(f=>f.captureId===state.frame.captureId)) {
-    await collections.save(state.frame);
-  }
-  renderFrame();
-  notify(state.demo ? "Simulated wavelength axis loaded."
-    : "Wavelength coefficients loaded from the instrument.");
-  log("Wavelength axis loaded.");
+function calibrationContext() {
+  if(!state.wavelengths||!state.factorySignature||!active())return null;
+  return {
+    serial:state.demo?'DEMO':state.driver.serialNumber||state.driver.device.serialNumber||'',
+    source:state.demo?'simulated':'hardware',deviceProfile:state.demo?'demo':state.driver.profile||'obp',
+    pixelCount:state.wavelengths.length,factorySignature:state.factorySignature
+  };
+}
+async function loadFactoryWavelengths() {
+  const epoch=state.epoch;
+  const grid=state.demo?Float64Array.from({length:1024},(_,i)=>350+i*450/1023)
+    : await state.driver.getWavelengths();
+  const signature=await gridSignature(grid);
+  if(epoch!==state.epoch)return false;
+  state.wavelengths=grid;state.factorySignature=signature;
+  calibration.setContext(calibrationContext());
+  return true;
+}
+$('calibrate').addEventListener('click',()=>run(async()=>{
+  if(!await loadFactoryWavelengths())return;
+  notify('Factory wavelengths loaded for new captures. Existing spectra were kept; capture again to use the loaded axis.');
+  log('Loaded factory wavelength grid.');
 }));
 
 function renderFrame() {
@@ -318,7 +326,8 @@ function renderFrame() {
   $("peak").textContent = f.intensities[peakIndex].toLocaleString();
   $("position").textContent = f.wavelengths
     ? f.wavelengths[peakIndex].toFixed(2) + " nm" : "px " + peakIndex;
-  $("legend").textContent = (f.source === "simulated" ? "SIMULATED · " : "") + f.mode;
+  $("legend").textContent = (f.source === "simulated" ? "SIMULATED · " : "") + f.mode +
+    (f.calibration ? " · aligned: " + f.calibration.name : f.wavelengths ? " · factory axis" : " · pixel axis");
   $("frameInfo").textContent = (state.reviewing ? "Saved capture" : "Frame " + state.frames) +
     (f.label ? " · " + f.label : "") + " · " +
     f.integration.toLocaleString() + " µs · " + new Date(f.timestamp).toLocaleTimeString();
@@ -408,30 +417,12 @@ canvas.addEventListener("pointerleave", () => {
 });
 new ResizeObserver(draw).observe(canvas.parentElement);
 
-$("export").addEventListener("click", () => {
-  const f = state.frame;
-  if (!f) return;
-  // Prefix formula initiators in untrusted metadata for spreadsheet safety.
-  const csvCell = value => {
-    let text = String(value);
-    if (/^[=+@\-\t\r]/.test(text)) text = "'" + text;
-    return '"' + text.replace(/"/g,'""') + '"';
-  };
-  const rows = [
-    "pixel,wavelength_nm,intensity_counts,integration_us,spectrum_type,source,serial,timestamp_utc,profile"
-  ];
-  for (let i = 0; i < f.intensities.length; i++) {
-    const values = [i, f.wavelengths ? f.wavelengths[i] : "", f.intensities[i],
-      f.integration, f.mode, f.source, f.serial, f.timestamp, f.profile];
-    rows.push(values.map(csvCell).join(","));
-  }
-  const blob = new Blob([rows.join("\r\n")], { type:"text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob), link = document.createElement("a");
-  link.href = url;
-  link.download = "ocean-" + f.source + "-" + f.timestamp.replace(/[:.]/g,"-") + ".csv";
-  document.body.appendChild(link); link.click(); link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  log("CSV exported.");
+$('export').addEventListener('click',()=>{
+  if(!state.frame)return;
+  const f=state.frame;
+  downloadFile('ocean-'+f.source+'-'+f.timestamp.replace(/[:.]/g,'-')+'.csv',
+    datasetCSV({name:'Single capture'},[f]),'text/csv;charset=utf-8');
+  log('CSV exported with wavelength calibration provenance.');
 });
 $("clearLog").addEventListener("click", () => { $("log").textContent = ""; });
 if (!navigator.usb || !window.isSecureContext) {
@@ -449,7 +440,31 @@ collections=new DatasetPanel({
   },
   update,notify,log
 });
+calibration=new CalibrationPanel({
+  canEdit:()=>!state.busy&&!state.live&&!state.closing&&!collections.busy,
+  isConnected:active,run,notify,log,
+  capture:async()=>{
+    const epoch=state.epoch,config=settings();
+    await prepare(config);
+    if(epoch!==state.epoch||!await loadFactoryWavelengths())return null;
+    const frame=await acquire(config,{reference:true});
+    if(!frame||epoch!==state.epoch)return null;
+    return {frame,context:calibrationContext()};
+  },
+  show:frame=>{state.frame=frame;state.reviewing=false;renderFrame();update();}
+});
+canvas.addEventListener('click',event=>{
+  const f=state.frame,box=plotBox;if(!f||!box)return;
+  const rect=canvas.getBoundingClientRect();
+  const ratio=Math.max(0,Math.min(1,(event.clientX-rect.left-box.left)/box.width));
+  const target=box.xMin+ratio*(box.xMax-box.xMin);
+  let pixel=Math.round(target);
+  if(f.wavelengths){pixel=0;for(let p=1;p<f.wavelengths.length;p++) {
+    if(Math.abs(f.wavelengths[p]-target)<Math.abs(f.wavelengths[pixel]-target))pixel=p;
+  }}
+  calibration.pickPixel(pixel,f.captureId);
+});
 update();
 draw();
-collections.init();
+collections.init().then(()=>calibration.init(collections.store));
 
