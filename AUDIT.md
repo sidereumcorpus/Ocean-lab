@@ -11,10 +11,10 @@ Audited baseline: e0ba9bcd18e0557a9c7b74c81acef3df4bd6269a. Updated application:
 | High/full speed | Correct split selected by status byte 14 | High: 2048 bytes EP6, 5632 bytes EP2. Full: 7680 bytes EP2. No unsafe fallback/retry after partial high-speed acquisition. |
 | Synchronization | 0x69 checked, but no device FIFO reset attempt | Read sync from EP2 after all spectral bytes. Mismatch clears host buffers, attempts USB reset, then closes; reconnect required. If reset fails, close is still attempted; device-side flush cannot then be guaranteed. |
 | Pixel interpretation | 3840 samples plotted, including dummy/black/tail | Consume all 7680 bytes, preserve raw frame, expose 3648 active pixels. See index correction below. |
-| Optical black | Not exposed | Preserve black samples independently; optional floating-point baseline subtraction in the plot. |
+| Optical black | Not exposed | Preserve black samples independently; always-on floating-point baseline subtraction in the USB4000 plot. |
 | EEPROM | Wavelengths only, serial fallback; first-null termination | Serial always read from slot 0. ASCII nulls removed, strict finite numeric parsing. Public queued getFactoryCalibration() reads 1–4 wavelength, 5 stray light, 6–13 nonlinearity. No EEPROM writes. |
 | Autoscale | Missing | Binary slot 17 full-response bytes 6–7, uint16 LE. Scale 65535/level, round and clamp to uint16. Zero/unprogrammed uses unity gain. |
-| Wavelengths | 3840-element extrapolated grid | 3648 elements, requested active polynomial coordinate i=0..3647. Check absolute agreement against a known lamp on the actual unit. |
+| Wavelengths | 3840-element extrapolated grid | Corrected in 1.5.1: 3648 elements evaluated at original raw coordinates 21..3668. The earlier reset to active coordinate zero caused the observed 21-pixel left shift. |
 | Spectroscopy | No absorbance/%T workflow existed | Added session-only dark/reference acquisition and derived views. Nonpositive corrected signals/denominators and nonfinite results are invalid gaps, never Infinity/epsilon artifacts. |
 | Reference validity | No dark/reference state existed | Clear on exposure/mode changes and connection transitions; require matching source, serial, profile, exposure, mode, size and optical-dark setting. |
 | Queue | Public transactions already serialized; connection exposed device before initialization ended | Reject public operations while connecting; immutable per-transaction generation tokens protect reconnects using the same USBDevice. |
@@ -75,3 +75,14 @@ readable. Their alignment profiles require a new capture for the changed grid.
 - Ocean Optics USB4000 Data Sheet, 211-00000-000-05-201210: pixel definition p. 8; USB endpoints/commands, EEPROM and spectrum format pp. 16–22; status layout p. 29. https://spectrecology.com/wp-content/uploads/2020/11/USB4000-Data-Sheet.pdf
 - Python-SeaBreeze primary implementation: FPGA4K split reads and USB4000 saturation mixin (response[6:8]). https://python-seabreeze.readthedocs.io/en/latest/_modules/seabreeze/pyseabreeze/features/spectrometer.html
 - Ocean Optics STS OEM data sheet / OBP commands (STS profile only): https://oceanoptics.jp/technical/oem_datasheet_STS.pdf
+
+## 1.5.1 field correction
+
+User comparison with OceanView found an exact 21-pixel displacement. The 1.5.0
+audit incorrectly accepted restarting the EEPROM polynomial at zero after
+cropping. Wavelengths now evaluate P(activeIndex+21), through P(3668). Tests
+compare every retained wavelength against the original coordinate polynomial.
+Factory loading is automatic before capture. USB4000 optical-black subtraction
+is enforced for both sample and spectroscopy references, independently of the
+read-only checkbox. It remains a per-frame black mean, not a claim of exact
+OceanView 15-scan temporal filtering. Old archives are preserved, not rewritten.

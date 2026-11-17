@@ -1,10 +1,10 @@
-import { SpectroscopySession } from './spectroscopy.js';
+import { SpectroscopySession, signalCounts, usesOpticalDark } from './spectroscopy.js?v=factory-2';
 import { initializeWorkspace } from "./ui.js";
-import { selectSpectrometer } from "./spectrometer.js?v=audit-1";
-import { DatasetPanel, downloadFile } from "./dataset-ui.js?v=audit-1";
-import { datasetCSV } from "./datasets.js?v=audit-1";
+import { selectSpectrometer } from "./spectrometer.js?v=factory-2";
+import { DatasetPanel, downloadFile } from "./dataset-ui.js?v=factory-2";
+import { datasetCSV } from "./datasets.js?v=factory-2";
 import { gridSignature, alignGrid } from "./calibration.js";
-import { CalibrationPanel } from "./calibration-ui.js?v=audit-1";
+import { CalibrationPanel } from "./calibration-ui.js?v=factory-2";
 
 const $ = id => document.getElementById(id);
 const state = {
@@ -26,7 +26,7 @@ function refreshSpectroscopy() {
   displayValues=null;
   if (!state.frame) return;
   try {
-    displayValues=spectroscopySession.process(state.frame,$("displayMode").value,$("opticalDark").checked);
+    displayValues=spectroscopySession.process(state.frame,$("displayMode").value);
     const invalid=Array.from(displayValues).filter(v=>!Number.isFinite(v)).length;
     $("spectroscopyStatus").textContent=(spectroscopySession.dark?"Dark ready. ":"Dark missing. ")+
       (spectroscopySession.reference?"Reference ready. ":"Reference missing. ")+
@@ -62,7 +62,7 @@ function update() {
   $('integration').max = legacy ? '65535000' : '4294967295';
   $('integration').step = legacy ? '10' : '1';
   $('deviceNote').textContent = legacy
-    ? 'USB4000: 3840 wire samples → 3648 active pixels. Counts use factory saturation scaling. Optical black subtraction is optional. Normal mode: 3800–65535000 µs, 10 µs increments.'
+    ? 'USB4000: 3840 wire samples → 3648 active pixels. Counts use factory saturation scaling. Electric dark correction is always on. Normal mode: 3800–65535000 µs, 10 µs increments.'
     : 'Wavelengths assume a full, unbinned detector readout.';
   $("status").textContent = state.closing ? "Disconnecting…"
     : state.demo ? "Demo · simulated"
@@ -82,8 +82,13 @@ function update() {
   $("mode").disabled = state.busy || state.live || state.closing;
   $("settings").disabled = connected || state.busy || dataBusy || state.closing;
   for(const id of ['captureDark','captureWhite']) $(id).disabled=!connected||state.busy||state.live||state.closing||dataBusy;
-  $('opticalDark').disabled=!legacy||state.busy||state.live||state.closing;
-  if(!legacy)$('opticalDark').checked=false;
+  // This is a read-only status indicator, never a processing toggle.
+  $('opticalDark').disabled=true;
+  $('opticalDark').checked=legacy || Boolean(state.frame && usesOpticalDark(state.frame));
+  $('acquisitionDefaults').textContent=!connected ? 'Connect to load factory wavelengths automatically.'
+    : !state.wavelengths ? 'Loading factory wavelengths…'
+    : (calibration?.active ? 'Custom wavelength alignment active.' : 'Factory wavelengths loaded automatically.') +
+      (legacy ? ' Electric dark correction: always on.' : '');
   if(collections) collections.update();
   if(calibration) calibration.update();
 }
@@ -178,14 +183,22 @@ $("connect").addEventListener("click", () => run(async () => {
   state.demo = false;
   state.epoch++;
   clearFrame();
+  // Capture controls remain busy until EEPROM coefficients and grid identity
+  // are loaded. A failure is explicit; never silently acquire a pixel-only axis.
+  try {
+    if(!await loadFactoryWavelengths())return;
+  } catch(error) {
+    await driver.disconnect();
+    throw error;
+  }
   const d = driver.device;
   $("deviceInfo").textContent =
     (d.productName || "Spectrometer") + " · " + (driver.serialNumber || d.serialNumber || "No serial reported") +
     (driver.profile === "usb4000" ? " · USB4000 legacy · " + (driver.highSpeed ? "high speed" : "full speed") : " · OBP");
   log("Connected: " + (d.productName || "OBP spectrometer") + ".");
   notify(driver.profile === 'usb4000'
-    ? 'USB4000 detected automatically. Capture device counts, then Load wavelengths. No endpoint values are needed.'
-    : 'OBP connected. Set integration time and capture a spectrum.');
+    ? 'USB4000 ready. Factory wavelengths loaded; electric dark correction is always on. Capture to begin.'
+    : 'OBP ready. Factory wavelengths loaded. Set integration time and capture a spectrum.');
 }));
 
 $("demo").addEventListener("click", () => {
@@ -197,7 +210,7 @@ $("demo").addEventListener("click", () => {
   notify("Demo mode: all spectra and wavelengths are simulated.");
   log("Demo session started.");
   update();
-  run(() => acquire(settings()));
+  run(async()=>{if(await loadFactoryWavelengths())await acquire(settings());});
 });
 
 $("disconnect").addEventListener("click", async () => {
@@ -225,6 +238,7 @@ $("disconnect").addEventListener("click", async () => {
 });
 
 async function prepare(config) {
+  if(!state.wavelengths && !await loadFactoryWavelengths())throw new Error("Factory wavelength loading cancelled.");
   if (!state.demo && state.driver.integrationTime !== config.integration) {
     resetSpectroscopy();
     await state.driver.setIntegrationTime(config.integration);
@@ -358,7 +372,7 @@ function renderFrame() {
     if (f.intensities[i] > f.intensities[peakIndex]) peakIndex = i;
   }
   $("pixels").textContent = f.intensities.length.toLocaleString();
-  $("peak").textContent = f.intensities[peakIndex].toLocaleString();
+  $("peak").textContent = signalCounts(f)[peakIndex].toLocaleString(undefined,{maximumFractionDigits:1});
   $("position").textContent = f.wavelengths
     ? f.wavelengths[peakIndex].toFixed(2) + " nm" : "px " + peakIndex;
   $("legend").textContent = (f.source === "simulated" ? "SIMULATED · " : "") + f.mode +
@@ -503,7 +517,6 @@ canvas.addEventListener('click',event=>{
   calibration.pickPixel(pixel,f.captureId);
 });
 for(const id of ['integration','mode']) $(id).addEventListener('input',()=>{resetSpectroscopy();draw();});
-$('opticalDark').addEventListener('change',()=>{resetSpectroscopy();draw();});
 $('displayMode').addEventListener('change',draw);
 for(const [id,kind] of [['captureDark','dark'],['captureWhite','reference']]) {
   $(id).addEventListener('click',()=>run(async()=>{
@@ -512,7 +525,7 @@ for(const [id,kind] of [['captureDark','dark'],['captureWhite','reference']]) {
     if(epoch!==state.epoch)return;
     const frame=await acquire(config);
     if(!frame||epoch!==state.epoch)return;
-    spectroscopySession.capture(kind,frame,$('opticalDark').checked);
+    spectroscopySession.capture(kind,frame);
     draw();notify(kind==='dark'?'Dark captured. Unblock the source for the reference.':'Reference captured. Insert the sample for measurement.');
   }));
 }

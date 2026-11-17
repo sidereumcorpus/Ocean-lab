@@ -30,3 +30,18 @@ test('references are copies and cannot cross exposure/mode/device/grid boundarie
     {profile:'obp'},{intensities:[1]}])assert.throws(()=>session.process(frame(extra),'absorbance'),/matching/);
   session.clear();assert.equal(session.dark,null);assert.equal(session.reference,null);
 });
+
+test('USB4000 counts automatically subtract optical black without a UI toggle',()=>{
+  const f=frame({intensities:Uint16Array.of(10,20),detector:{opticalDarkMean:10.5}});
+  const session=new SpectroscopySession();
+  assert.deepEqual([...signalCounts(f)],[-.5,9.5]);
+  assert.deepEqual([...session.process(f,'counts')],[-.5,9.5]);
+  assert.deepEqual([...f.intensities],[10,20]); // Preserve archive counts.
+});
+test('automatic optical black policy is identical for dark, light reference and sample',()=>{
+  const session=new SpectroscopySession();
+  session.capture('dark',frame({intensities:[10,10],detector:{opticalDarkMean:5}}));
+  session.capture('reference',frame({intensities:[110,110],detector:{opticalDarkMean:15}}));
+  const sample=frame({intensities:[60,60],detector:{opticalDarkMean:10}});
+  assert.deepEqual([...session.process(sample,'transmittance')],[50,50]);
+});

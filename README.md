@@ -128,11 +128,11 @@ external scripts, external fonts, server APIs, or runtime dependencies.
 
 For the silver USB4000 (VID 0x2457, PID 0x1022):
 
-1. Refresh the page to load version 1.5, then leave **Instrument profile → Auto**.
+1. Refresh the page to load version 1.5.1, then leave **Instrument profile → Auto**.
 2. Choose **Connect USB** and select the USB4000.
 3. Leave all endpoint fields blank; USB4000 uses its model-defined endpoint roles.
 4. Start with **100000 µs** integration and choose **Capture**.
-5. Choose **Load wavelengths** to read the instrument's EEPROM calibration.
+5. Factory wavelengths load automatically before capture is enabled. USB4000 electric dark correction is always on; no checkbox setup is needed.
 
 Normal trigger mode is set at connection. Supported exposure times are
 3800–65535000 µs in 10 µs increments. Shorter shutter-mode exposures are
@@ -143,8 +143,9 @@ captures contain **3648 active samples**, using `raw.slice(21,3669)`.
 The manufacturer table uses one-based pixel numbers: optical active 22–3669,
 optical black 6–18 (`raw.slice(5,18)`). Do not include transitional JS index 18
 in the optical-black mean or shift the active window one pixel to the right.
-The requested wavelength polynomial evaluates active indices 0–3647. Verify
-absolute wavelength agreement against a known lamp on the physical unit.
+The wavelength polynomial evaluates original raw indices **21–3668** for the
+retained samples. Displayed active indices remain 0–3647. Restarting the
+polynomial at zero caused the 21-pixel left shift fixed in 1.5.1.
 Older 3840-sample captures remain readable, but their old alignment profiles
 cannot match the new grid; capture a new alignment profile.
 
@@ -173,7 +174,7 @@ and normalized optical-black mean in JSON and CSV processing metadata.
 
 In **Acquire → Dark, reference & spectroscopy**, capture dark with the source
 blocked and a light reference without the sample. Select Absorbance or %T.
-Derived views and optional optical-black subtraction are session-only;
+Derived views and always-on USB4000 optical-black subtraction are session-only;
 archives/exports retain normalized counts and processing metadata. Optical
 black subtraction uses floating point so negative noise does not wrap.
 Nonpositive dark-corrected sample/reference values and nonfinite results
@@ -269,3 +270,9 @@ Hardware compatibility and real USB behavior require testing with the target mod
 - tests/*.test.js — dependency-free protocol tests
 - .github/workflows/pages.yml — protocol and syntax checks; Pages uses the main branch root
 
+
+Version 1.5.1 automatically loads factory wavelengths on connection (including demo).
+Use Reload factory wavelengths under device details only when needed. Previously
+saved captures retain their original axes; recapture affected measurements and
+recreate any alignment profiles made with the old, shifted factory grid. Grid
+signatures prevent those profiles from being applied to the corrected axis.

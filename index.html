@@ -6,8 +6,8 @@
 <meta name="theme-color" content="#111820">
 <meta name="description" content="Browser-based Ocean Optics USB4000 and OBP spectrometer dashboard.">
 <title>Ocean Lab · Spectrometer</title>
-<link rel="stylesheet" href="./style.css?v=audit-1">
-<script type="module" src="./app.js?v=audit-1"></script>
+<link rel="stylesheet" href="./style.css?v=factory-2">
+<script type="module" src="./app.js?v=factory-2"></script>
 </head>
 <body><main class="app-shell">
 <header class="app-header"><div class="brand"><div class="eyebrow">OCEAN LAB</div><h1>Spectrometer</h1></div><div class="device-identity"><div id="status" class="status" role="status">Disconnected</div><div id="deviceInfo" class="muted">No instrument selected</div></div>
@@ -30,11 +30,12 @@
 <button id="tab-activity" role="tab" aria-selected="false" aria-controls="pane-activity" data-tab-group="workspace" data-tab="activity" tabindex="-1">Activity</button>
 </div><section id="pane-acquire" class="tab-pane" role="tabpanel" aria-labelledby="tab-acquire" data-tab-panel="workspace" tabindex="0">
 <div class="pane-title"><div class="eyebrow">MEASUREMENT</div><h2>Acquisition</h2></div>
+<p id="acquisitionDefaults" class="note" role="status">Factory wavelengths load automatically. USB4000 electric dark correction is always on.</p>
 <div class="grid2"><div><label for="integration">Integration time · µs</label><input id="integration" type="number" min="1" max="4294967295" step="1" value="100000"></div>
 <div><label for="mode">Spectrum</label><select id="mode"><option value="corrected">Corrected</option><option value="raw">Raw ADC</option></select></div></div>
 <details><summary>Dark, reference & spectroscopy</summary>
 <label for="displayMode">Plot view</label><select id="displayMode"><option value="counts">Intensity counts</option><option value="transmittance">Transmittance · %</option><option value="absorbance">Absorbance · AU</option></select>
-<label class="check"><input id="opticalDark" type="checkbox" disabled> Subtract USB4000 optical black mean</label>
+<label class="check"><input id="opticalDark" type="checkbox" checked disabled> Electric dark correction · always on for USB4000</label>
 <div class="buttons"><button id="captureDark" disabled>Capture dark</button><button id="captureWhite" disabled>Capture light reference</button></div>
 <p id="spectroscopyStatus" class="note" role="status">Capture dark with the light blocked, then a light reference without the sample.</p>
 <p class="note">Derived views are session-only. Save and CSV retain saturation-scaled intensity counts and optical-black metadata. Invalid ratios appear as gaps. Changing integration time or spectrum mode clears dark/reference.</p>
@@ -44,7 +45,7 @@
 <label class="check"><input id="recordLive" type="checkbox"> Record live frames to dataset</label>
 <div id="recordingFields" hidden><div class="grid2"><div><label for="recordInterval">Save interval · seconds</label><input id="recordInterval" type="number" min="1" max="3600" step="1" value="1"></div><div><label for="recordLimit">Frames per recording</label><input id="recordLimit" type="number" min="1" max="2000" step="1" value="30"></div></div></div>
 <p id="recordState" class="note">Live mode is preview-only. Enable recording above to save a series.</p><small id="saveStatus" role="status"></small></div>
-<details><summary>Wavelength axis & device details</summary><div class="buttons"><button id="calibrate" disabled>Load factory wavelengths</button></div><p id="deviceNote" class="note">Wavelengths assume a full, unbinned detector readout.</p><p class="note">Stop finishes the current frame. Disconnect cancels USB immediately. Long exposures determine the actual recording interval.</p></details>
+<details><summary>Wavelength axis & device details</summary><div class="buttons"><button id="calibrate" disabled>Reload factory wavelengths</button></div><p id="deviceNote" class="note">Wavelengths assume a full, unbinned detector readout.</p><p class="note">Stop finishes the current frame. Disconnect cancels USB immediately. Long exposures determine the actual recording interval.</p></details>
 <p class="pane-hint">Use the controls below the plot to capture or start live acquisition. Manage collections in <button class="inline-button" data-open-tab="datasets">Datasets</button>.</p>
 </section><section id="pane-datasets" class="tab-pane datasets-pane" role="tabpanel" aria-labelledby="tab-datasets" data-tab-panel="workspace" tabindex="0" hidden>
 <div class="plot-head"><div><div class="eyebrow">SAVED MEASUREMENTS</div><h2 id="datasetsHeading">Datasets</h2></div></div>

@@ -1,4 +1,4 @@
-import { OceanOBPSpectrometer } from './ocean-obp.js?v=audit-1';
+import { OceanOBPSpectrometer } from './ocean-obp.js?v=factory-2';
 
 /**
  * USB4000 legacy USB driver (VID 2457, PID 1022).
@@ -299,10 +299,13 @@ export class USB4000Spectrometer extends OceanOBPSpectrometer {
         }
         this._coefficients = coefficients;
       }
+      // EEPROM coefficients use original wire-pixel coordinates. Cropping
+      // intensities must not restart the calibration polynomial at zero.
       const wavelengths = new Float64Array(3648);
       for (let p = 0; p < wavelengths.length; p++) {
         const c = this._coefficients;
-        wavelengths[p] = ((c[3]*p+c[2])*p+c[1])*p+c[0];
+        const rawPixel = p + 21;
+        wavelengths[p] = ((c[3]*rawPixel+c[2])*rawPixel+c[1])*rawPixel+c[0];
         if (!Number.isFinite(wavelengths[p])) throw new Error('Invalid wavelength polynomial.');
       }
       return wavelengths;

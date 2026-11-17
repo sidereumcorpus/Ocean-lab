@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { USB4000Spectrometer } from '../usb4000.js?v=audit-1';
-import { OceanOBPSpectrometer } from '../ocean-obp.js?v=audit-1';
+import { USB4000Spectrometer } from '../usb4000.js?v=factory-2';
+import { OceanOBPSpectrometer } from '../ocean-obp.js?v=factory-2';
 import { createSpectrometerForDevice, selectSpectrometer } from '../spectrometer.js';
 
 const view = bytes => new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
@@ -141,8 +141,14 @@ for(const eepromLength of [17,18]) {
   test('calibration accepts '+eepromLength+'-byte EEPROM replies and indexes slots 1–4',async t=>{
     const {d,writes}=await connect(t,{eepromLength});
     const wavelengths=await d.getWavelengths();
-    assert.equal(wavelengths.length,3648);assert.equal(wavelengths[0],350);
-    assert.ok(Math.abs(wavelengths[100]-(350+50+1-.01))<1e-9);
+    assert.equal(wavelengths.length,3648);
+    const polynomial=p=>350+0.5*p+0.0001*p*p-1e-8*p*p*p;
+    assert.ok(Math.abs(wavelengths[0]-polynomial(21))<1e-9);
+        // Compare all retained pixels against the original readout coordinates,
+    // including both edges. This fails for the old exact 21-pixel shift.
+    for(let active=0;active<3648;active++) {
+      assert.ok(Math.abs(wavelengths[active]-polynomial(active+21))<1e-9);
+    }
     assert.deepEqual(writes.slice(-4),[[5,1],[5,2],[5,3],[5,4]]);
     const count=writes.length;await d.getWavelengths();assert.equal(writes.length,count);
     assert.ok(writes.every(w=>w[0]!==6)); // Never write EEPROM.

@@ -17,7 +17,13 @@ export function spectroscopy(sample, dark, reference, mode = 'transmittance') {
   });
 }
 
-export function signalCounts(frame, subtractOpticalDark = false) {
+// Older archived captures may have no black-pixel metadata; keep their
+// original counts readable rather than inventing a correction baseline.
+export function usesOpticalDark(frame) {
+  return frame.profile === 'usb4000' && frame.detector != null;
+}
+
+export function signalCounts(frame, subtractOpticalDark = usesOpticalDark(frame)) {
   const baseline = subtractOpticalDark ? frame.detector?.opticalDarkMean : 0;
   if (!Number.isFinite(baseline)) throw new Error('Optical dark data unavailable for this capture.');
   // Float64 preserves negative noise rather than wrapping into uint16.
@@ -31,13 +37,13 @@ export class SpectroscopySession {
     return JSON.stringify([frame.source,frame.serial,frame.profile,frame.mode,
       frame.integration,frame.intensities.length,Boolean(optical)]);
   }
-  capture(kind,frame,optical=false) {
+  capture(kind,frame,optical=usesOpticalDark(frame)) {
     if (!['dark','reference'].includes(kind)) throw new Error('Invalid reference kind.');
     const key=this.key(frame,optical);
     if (this[kind==='dark'?'reference':'dark']?.key!==key) this.clear();
     this[kind]={key,values:signalCounts(frame,optical)};
   }
-  process(frame,mode,optical=false) {
+  process(frame,mode,optical=usesOpticalDark(frame)) {
     const signal=signalCounts(frame,optical);
     if(mode==='counts')return signal;
     const key=this.key(frame,optical);
