@@ -4,31 +4,32 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#111820">
-<meta name="description" content="Browser-based Ocean Optics OBP spectrometer dashboard.">
+<meta name="description" content="Browser-based Ocean Optics USB4000 and OBP spectrometer dashboard.">
 <title>Ocean Lab · Spectrometer</title>
 <link rel="stylesheet" href="./style.css">
-<script type="module" src="./app.js"></script>
+<script type="module" src="./app.js?v=usb4000-1"></script>
 </head>
 <body>
 <main>
 <header><div><div class="eyebrow">OPTICAL INSTRUMENTATION</div>
 <h1>Ocean Lab<span class="muted"> / Spectrometer</span></h1></div>
 <div id="status" class="status" role="status">Disconnected</div></header>
-<div id="notice" role="status" aria-live="polite">Connect an OBP spectrometer, or explore a simulated spectrum in demo mode.</div>
+<div id="notice" role="status" aria-live="polite">Connect a USB4000 or OBP spectrometer, or explore a simulated spectrum in demo mode.</div>
 <div class="layout">
 <aside class="sidebar">
 <section class="panel"><h2>01 · Connection</h2><p class="muted">Ocean Optics / Ocean Insight</p>
 <div id="deviceInfo" class="muted">No instrument selected</div>
 <div class="buttons"><button id="connect" class="primary">Connect USB</button><button id="demo">Try demo</button><button id="disconnect" class="danger" disabled>Disconnect</button></div>
 <details><summary>USB & protocol settings</summary>
-<p class="note">Defaults use the STS OBP uint16 command profile. Other models may require different commands or data formats.</p>
+<p class="note">Auto detects USB4000 by its USB ID. OBP settings apply only to OBP instruments; USB4000 endpoint roles are automatic.</p>
 <fieldset id="settings">
-<label for="protocol">Protocol version · hexadecimal</label><input id="protocol" value="1100" spellcheck="false">
+<label for="profile">Instrument profile</label><select id="profile"><option value="auto">Auto · USB4000 / OBP</option><option value="usb4000">USB4000 · legacy USB</option><option value="obp">OBP · STS uint16 profile</option></select>
+<label for="protocol">OBP protocol version · hexadecimal</label><input id="protocol" value="1100" spellcheck="false">
 <div class="grid2">
 <div><label for="iface">Interface · optional</label><input id="iface" type="number" min="0" max="255" placeholder="Auto"></div>
 <div><label for="alternate">Alternate · optional</label><input id="alternate" type="number" min="0" max="255" placeholder="Auto"></div>
-<div><label for="epIn">Bulk IN · optional</label><input id="epIn" type="number" min="1" max="15" placeholder="Auto"></div>
-<div><label for="epOut">Bulk OUT · optional</label><input id="epOut" type="number" min="1" max="15" placeholder="Auto"></div>
+<div><label for="epIn">OBP bulk IN · optional</label><input id="epIn" type="number" min="1" max="15" placeholder="Auto"></div>
+<div><label for="epOut">OBP bulk OUT · optional</label><input id="epOut" type="number" min="1" max="15" placeholder="Auto"></div>
 </div>
 <label for="corrected">Corrected command · hexadecimal</label><input id="corrected" value="00101000" spellcheck="false">
 <label for="raw">Raw command · hexadecimal</label><input id="raw" value="00101100" spellcheck="false">
@@ -41,7 +42,7 @@
 <label for="mode">Spectrum</label><select id="mode"><option value="corrected">Corrected</option><option value="raw">Raw ADC</option></select>
 <div class="buttons"><button id="capture" class="primary" disabled>Capture</button><button id="live" disabled>Start live</button><button id="stop" disabled>Stop</button></div>
 <div class="buttons"><button id="calibrate" disabled>Load wavelengths</button><button id="export" disabled>Export CSV</button></div>
-<p class="note">Stop finishes the current frame. Disconnect closes USB immediately. Wavelengths assume a full, unbinned detector readout.</p>
+<p class="note">Stop finishes the current frame. Disconnect closes USB immediately.</p><p id="deviceNote" class="note">Wavelengths assume a full, unbinned detector readout.</p>
 </section>
 </aside>
 <div>
@@ -59,3 +60,4 @@
 </main>
 </body>
 </html>
+

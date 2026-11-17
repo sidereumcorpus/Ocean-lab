@@ -62,7 +62,7 @@ export class OceanOBPSpectrometer {
   }
 
   /** Invoke directly from a user gesture to preserve USB chooser activation. */
-  async connect() {
+  async connect(selectedDevice = null) {
     if (typeof navigator === "undefined" || !navigator.usb ||
         !globalThis.isSecureContext) {
       throw new Error("WebUSB requires a supported browser and HTTPS or localhost.");
@@ -79,7 +79,11 @@ export class OceanOBPSpectrometer {
       if (generation !== this._generation) throw new Error("Connection cancelled.");
     };
     try {
-      device = await this._usb.requestDevice({ filters: [{ vendorId: 0x2457 }] });
+      device = selectedDevice || await this._usb.requestDevice({ filters: [{ vendorId: 0x2457 }] });
+      if (device.vendorId !== 0x2457) throw new Error("Not an Ocean Optics device.");
+      if (device.productId === 0x1022) {
+        throw new Error("USB4000 requires the legacy driver; select Auto or USB4000.");
+      }
       check();
       await device.open();
       check();
@@ -400,3 +404,4 @@ export class OceanOBPSpectrometer {
     }
   }
 }
+

@@ -1,10 +1,10 @@
 {
   "name": "ocean-lab",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test tests/obp.test.js",
-    "check": "node --check ocean-obp.js && node --check app.js"
+    "test": "node --test tests/*.test.js",
+    "check": "node --check ocean-obp.js && node --check usb4000.js && node --check spectrometer.js && node --check app.js"
   }
 }

@@ -1,4 +1,4 @@
-import { OceanOBPSpectrometer } from "./ocean-obp.js";
+import { selectSpectrometer } from "./spectrometer.js";
 
 const $ = id => document.getElementById(id);
 const state = {
@@ -24,6 +24,18 @@ function active() {
 }
 function update() {
   const connected = active();
+  const legacy = connected && !state.demo && state.driver.profile === 'usb4000';
+  const corrected = document.querySelector('#mode option[value="corrected"]');
+  const raw = document.querySelector('#mode option[value="raw"]');
+  corrected.disabled = legacy;
+  raw.textContent = legacy ? 'Device counts (USB4000)' : 'Raw ADC';
+  if (legacy) $('mode').value = 'raw';
+  $('integration').min = legacy ? '3800' : '1';
+  $('integration').max = legacy ? '65535000' : '4294967295';
+  $('integration').step = legacy ? '10' : '1';
+  $('deviceNote').textContent = legacy
+    ? 'USB4000: 3840 readout samples include non-active detector regions. Normal mode uses 3800–65535000 µs in 10 µs increments. No host corrections are applied.'
+    : 'Wavelengths assume a full, unbinned detector readout.';
   $("status").textContent = state.closing ? "Disconnecting…"
     : state.demo ? "Demo · simulated"
     : state.driver && state.driver.connected ? "USB connected"
@@ -72,6 +84,7 @@ function hexInput(id, max) {
 }
 function driverOptions() {
   return {
+    profile: $("profile").value,
     protocolVersion: hexInput("protocol", 0xffff),
     interfaceNumber: integerInput("iface", 0, 255, true),
     alternateSetting: integerInput("alternate", 0, 255, true),
@@ -110,7 +123,7 @@ async function run(task) {
 
 $("connect").addEventListener("click", () => run(async () => {
   // Keep connect before the first await; USB chooser needs user activation.
-  const driver = new OceanOBPSpectrometer(driverOptions());
+  const {driver,device} = await selectSpectrometer(driverOptions());
   state.driver = driver;
   driver.onDisconnect = () => {
     state.epoch++;
@@ -120,15 +133,18 @@ $("connect").addEventListener("click", () => run(async () => {
     log("USB device removed.");
     update();
   };
-  await driver.connect();
+  await driver.connect(device);
   state.demo = false;
   state.epoch++;
   clearFrame();
   const d = driver.device;
   $("deviceInfo").textContent =
-    (d.productName || "OBP spectrometer") + " · " + (d.serialNumber || "No serial reported");
+    (d.productName || "Spectrometer") + " · " + (driver.serialNumber || d.serialNumber || "No serial reported") +
+    (driver.profile === "usb4000" ? " · USB4000 legacy · " + (driver.highSpeed ? "high speed" : "full speed") : " · OBP");
   log("Connected: " + (d.productName || "OBP spectrometer") + ".");
-  notify("Connected. Set integration time and capture a spectrum.");
+  notify(driver.profile === 'usb4000'
+    ? 'USB4000 detected automatically. Capture device counts, then Load wavelengths. No endpoint values are needed.'
+    : 'OBP connected. Set integration time and capture a spectrum.');
 }));
 
 $("demo").addEventListener("click", () => {
@@ -195,10 +211,12 @@ async function acquire(config) {
     intensities,
     wavelengths: state.wavelengths ? state.wavelengths.slice() : null,
     integration: config.integration,
-    mode: config.raw ? "raw" : "corrected",
+    mode: !demo && state.driver.profile === 'usb4000' ? 'device-counts'
+      : config.raw ? "raw" : "corrected",
+    profile: demo ? 'demo' : state.driver.profile || 'obp',
     timestamp: new Date().toISOString(),
     source: demo ? "simulated" : "hardware",
-    serial: demo ? "DEMO" : state.driver.device.serialNumber || ""
+    serial: demo ? "DEMO" : state.driver.serialNumber || state.driver.device.serialNumber || ""
   };
   renderFrame();
 }
@@ -374,11 +392,11 @@ $("export").addEventListener("click", () => {
     return '"' + text.replace(/"/g,'""') + '"';
   };
   const rows = [
-    "pixel,wavelength_nm,intensity_counts,integration_us,spectrum_type,source,serial,timestamp_utc"
+    "pixel,wavelength_nm,intensity_counts,integration_us,spectrum_type,source,serial,timestamp_utc,profile"
   ];
   for (let i = 0; i < f.intensities.length; i++) {
     const values = [i, f.wavelengths ? f.wavelengths[i] : "", f.intensities[i],
-      f.integration, f.mode, f.source, f.serial, f.timestamp];
+      f.integration, f.mode, f.source, f.serial, f.timestamp, f.profile];
     rows.push(values.map(csvCell).join(","));
   }
   const blob = new Blob([rows.join("\r\n")], { type:"text/csv;charset=utf-8" });
@@ -395,3 +413,4 @@ if (!navigator.usb || !window.isSecureContext) {
 }
 update();
 draw();
+
