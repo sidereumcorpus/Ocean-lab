@@ -1,4 +1,4 @@
-import { validateCalibration } from './calibration.js';
+import { validateCalibration } from './calibration.js?v=pixels-3';
 /** Local, dependency-free dataset storage and portable file formats. */
 export const MAX_FRAMES = 2000;
 const MAX_PIXELS = 32768;
@@ -48,12 +48,12 @@ export function normalizeFrame(frame) {
   };
   if(frame.detector!==undefined) {
     const d=frame.detector;
-    if(frame.profile!=='usb4000'||values.length!==3648||!d||d.activeStart!==21||d.rawPixelCount!==3840||
+    if(frame.profile!=='usb4000'||values.length!==3648||!d||![0,21].includes(d.activeStart)||d.rawPixelCount!==3840||
       !(d.autoscaleLevel===null||Number.isInteger(d.autoscaleLevel)&&d.autoscaleLevel>0&&d.autoscaleLevel<=65535)||
       !Number.isFinite(d.opticalDarkMean)||d.opticalDarkMean<0||d.opticalDarkMean>65535*65535) {
       throw new Error('Invalid USB4000 detector processing metadata.');
     }
-    normalized.detector={activeStart:21,rawPixelCount:3840,autoscaleLevel:d.autoscaleLevel,opticalDarkMean:d.opticalDarkMean};
+    normalized.detector={activeStart:d.activeStart,rawPixelCount:3840,autoscaleLevel:d.autoscaleLevel,opticalDarkMean:d.opticalDarkMean};
   }
   if(frame.calibration !== undefined) normalized.calibration=frame.calibration===null?null:validateCalibration(frame.calibration);
   if(normalized.calibration) {

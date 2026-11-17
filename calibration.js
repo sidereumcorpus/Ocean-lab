@@ -28,13 +28,18 @@ export function findLinePeak(intensities,grid,seed,radius=12) {
   return {pixel,integerPixel:peak,measuredNm:wavelengthAt(grid,pixel),counts:b};
 }
 
-export async function gridSignature(grid) {
+export async function gridSignature(grid, readoutConvention = '') {
   const bytes=new Uint8Array(grid.length*8),view=new DataView(bytes.buffer);
   for(let i=0;i<grid.length;i++) {
     if(!Number.isFinite(grid[i]))throw new Error('Factory wavelength grid is invalid.');
     view.setFloat64(i*8,grid[i],true);
   }
-  const hash=await crypto.subtle.digest('SHA-256',bytes);
+  // Same wavelengths do not imply the same sample mapping. Include the
+  // convention to reject profiles made with the old cropped sample window.
+  const tag=new TextEncoder().encode(readoutConvention);
+  const identity=new Uint8Array(bytes.length+tag.length);
+  identity.set(bytes);identity.set(tag,bytes.length);
+  const hash=await crypto.subtle.digest('SHA-256',identity);
   return Array.from(new Uint8Array(hash),b=>b.toString(16).padStart(2,'0')).join('');
 }
 

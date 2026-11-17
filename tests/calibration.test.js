@@ -65,3 +65,11 @@ test('uncalibrated legacy backup remains readable without calibration fields',()
   const f=frame();delete f.calibration;delete f.factoryWavelengths;
   const result=normalizeFrame(f);assert.equal(result.calibration,undefined);assert.equal(result.factoryWavelengths,undefined);
 });
+
+test('identical wavelength grids with different readout conventions cannot reuse profiles',async()=>{
+  const grid=Float64Array.of(350,351,352);
+  const old=await gridSignature(grid);
+  const corrected=await gridSignature(grid,'usb4000:oceanview:raw0:3648:v1');
+  assert.notEqual(corrected,old);
+  assert.equal(corrected,await gridSignature(grid,'usb4000:oceanview:raw0:3648:v1'));
+});

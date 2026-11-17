@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { USB4000Spectrometer } from '../usb4000.js?v=factory-2';
-import { OceanOBPSpectrometer } from '../ocean-obp.js?v=factory-2';
+import { USB4000Spectrometer } from '../usb4000.js?v=pixels-3';
+import { OceanOBPSpectrometer } from '../ocean-obp.js?v=pixels-3';
 import { createSpectrometerForDevice, selectSpectrometer } from '../spectrometer.js';
 
 const view = bytes => new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
@@ -116,7 +116,7 @@ test('initialization claims primary interface, sets normal mode, detects speed a
 for(const highSpeed of [true,false]) {
   test((highSpeed?'high':'full')+'-speed spectra preserve pixel order, endian values and consume sync across frames',async t=>{
     const {d,reads,values}=await connect(t,{highSpeed,chunkSize:137});
-    for(let n=0;n<2;n++)assert.deepEqual(await d.getSpectrum(),values.slice(21,3669));
+    for(let n=0;n<2;n++)assert.deepEqual(await d.getSpectrum(),values.slice(0,3648));
     const spectral=reads.filter(r=>r.ep!==1);
     assert.equal(spectral.some(r=>r.ep===6),highSpeed);
     assert.ok(spectral.every(r=>r.length%(highSpeed?512:64)===0));
@@ -143,11 +143,11 @@ for(const eepromLength of [17,18]) {
     const wavelengths=await d.getWavelengths();
     assert.equal(wavelengths.length,3648);
     const polynomial=p=>350+0.5*p+0.0001*p*p-1e-8*p*p*p;
-    assert.ok(Math.abs(wavelengths[0]-polynomial(21))<1e-9);
+    assert.ok(Math.abs(wavelengths[0]-polynomial(0))<1e-9);
         // Compare all retained pixels against the original readout coordinates,
-    // including both edges. This fails for the old exact 21-pixel shift.
+    // including both edges. Sample p must be raw[p], with wavelength P(p).
     for(let active=0;active<3648;active++) {
-      assert.ok(Math.abs(wavelengths[active]-polynomial(active+21))<1e-9);
+      assert.ok(Math.abs(wavelengths[active]-polynomial(active))<1e-9);
     }
     assert.deepEqual(writes.slice(-4),[[5,1],[5,2],[5,3],[5,4]]);
     const count=writes.length;await d.getWavelengths();assert.equal(writes.length,count);
@@ -208,11 +208,11 @@ test('bad EEPROM echoes fail connection and release the device',async t=>{
   assert.equal(mock.listeners.size,0);
 });
 
-test('active slicing excludes sentinel dummy/tail samples and retains optical black separately',async t=>{
+test('OceanView readout retains original pixel numbers and optical black separately',async t=>{
   const {d,values}=await connect(t);
   const result=await d.getSpectrum();
   assert.equal(result.length,3648);
-  assert.equal(result[0],values[21]);assert.equal(result[3647],values[3668]);
+  assert.equal(result[0],values[0]);assert.equal(result[3647],values[3647]);
   assert.deepEqual(d.lastRawSpectrum,values);
   assert.deepEqual(d.opticalDarkPixels,values.slice(5,18));
 });
@@ -221,7 +221,7 @@ for(const autoscale of [0,32768,65535]) {
     const {d,values}=await connect(t,{autoscale});
     const active=await d.getSpectrum(),gain=autoscale?65535/autoscale:1;
     assert.equal(d.autoscaleLevel,autoscale||null);
-    for(let p=0;p<3648;p++)assert.equal(active[p],Math.min(65535,Math.round(values[p+21]*gain)));
+    for(let p=0;p<3648;p++)assert.equal(active[p],Math.min(65535,Math.round(values[p]*gain)));
   });
 }
 test('factory calibration reads stray light and all eight nonlinearity coefficients without EEPROM writes',async t=>{

@@ -56,3 +56,15 @@ test('USB4000 processing metadata survives JSON and CSV and is validated',()=>{
   assert.ok(datasetCSV(dataset,[f]).includes('optical_dark_mean_counts'));
   assert.throws(()=>normalizeFrame({...f,detector:{...f.detector,activeStart:22}}),/metadata/);
 });
+
+test('OceanView raw-zero window and historical cropped-window metadata both round-trip',()=>{
+  const f={captureId:'pixels',label:'test',timestamp:new Date().toISOString(),source:'hardware',
+    serial:'USB4',profile:'usb4000',mode:'device-counts',integration:100000,
+    intensities:new Uint16Array(3648).fill(100),wavelengths:null};
+  const dataset={name:'Pixel convention',notes:'',createdAt:new Date().toISOString()};
+  for(const activeStart of [0,21]) {
+    const saved={...f,detector:{activeStart,rawPixelCount:3840,autoscaleLevel:65535,opticalDarkMean:10}};
+    const decoded=decodeBackup(encodeBackup(dataset,[saved])).frames[0];
+    assert.equal(decoded.detector.activeStart,activeStart);
+  }
+});

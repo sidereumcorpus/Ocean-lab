@@ -1,10 +1,10 @@
-import { SpectroscopySession, signalCounts, usesOpticalDark } from './spectroscopy.js?v=factory-2';
+import { SpectroscopySession, signalCounts, usesOpticalDark } from './spectroscopy.js?v=pixels-3';
 import { initializeWorkspace } from "./ui.js";
-import { selectSpectrometer } from "./spectrometer.js?v=factory-2";
-import { DatasetPanel, downloadFile } from "./dataset-ui.js?v=factory-2";
-import { datasetCSV } from "./datasets.js?v=factory-2";
-import { gridSignature, alignGrid } from "./calibration.js";
-import { CalibrationPanel } from "./calibration-ui.js?v=factory-2";
+import { selectSpectrometer } from "./spectrometer.js?v=pixels-3";
+import { DatasetPanel, downloadFile } from "./dataset-ui.js?v=pixels-3";
+import { datasetCSV } from "./datasets.js?v=pixels-3";
+import { gridSignature, alignGrid } from "./calibration.js?v=pixels-3";
+import { CalibrationPanel } from "./calibration-ui.js?v=pixels-3";
 
 const $ = id => document.getElementById(id);
 const state = {
@@ -62,7 +62,7 @@ function update() {
   $('integration').max = legacy ? '65535000' : '4294967295';
   $('integration').step = legacy ? '10' : '1';
   $('deviceNote').textContent = legacy
-    ? 'USB4000: 3840 wire samples → 3648 active pixels. Counts use factory saturation scaling. Electric dark correction is always on. Normal mode: 3800–65535000 µs, 10 µs increments.'
+    ? 'USB4000: 3840 wire samples → OceanView-compatible pixels 0–3647. Counts use factory saturation scaling. Electric dark correction is always on. Normal mode: 3800–65535000 µs, 10 µs increments.'
     : 'Wavelengths assume a full, unbinned detector readout.';
   $("status").textContent = state.closing ? "Disconnecting…"
     : state.demo ? "Demo · simulated"
@@ -279,7 +279,7 @@ async function acquire(config, {reference = false} = {}) {
     captureId: crypto.randomUUID(), label:config.label || "",
     intensities,
     ...(!demo && state.driver.profile==='usb4000'?{detector:{
-      activeStart:21,rawPixelCount:3840,autoscaleLevel:state.driver.autoscaleLevel,
+      activeStart:0,rawPixelCount:3840,autoscaleLevel:state.driver.autoscaleLevel,
       opticalDarkMean:Array.from(state.driver.opticalDarkPixels).reduce((a,b)=>a+b,0)/state.driver.opticalDarkPixels.length *
         (state.driver.autoscaleLevel?65535/state.driver.autoscaleLevel:1)
     }}:{}),
@@ -352,7 +352,8 @@ async function loadFactoryWavelengths() {
   const epoch=state.epoch;
   const grid=state.demo?Float64Array.from({length:1024},(_,i)=>350+i*450/1023)
     : await state.driver.getWavelengths();
-  const signature=await gridSignature(grid);
+  const signature=await gridSignature(grid, !state.demo && state.driver.profile==='usb4000'
+    ? 'usb4000:oceanview:raw0:3648:v1' : '');
   if(epoch!==state.epoch)return false;
   state.wavelengths=grid;state.factorySignature=signature;
   calibration.setContext(calibrationContext());

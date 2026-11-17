@@ -86,3 +86,26 @@ Factory loading is automatic before capture. USB4000 optical-black subtraction
 is enforced for both sample and spectroscopy references, independently of the
 read-only checkbox. It remains a per-frame black mean, not a claim of exact
 OceanView 15-scan temporal filtering. Old archives are preserved, not rewritten.
+
+## 1.5.2 correction from paired OceanView measurements
+
+The supplied Web_vs_OceanView.csv contains 3648 samples per program. Web row i
+matches OceanView row i+21 in wavelength to <=0.0005 nm (OceanView rounds to
+0.001 nm). Aligning this offset improves intensity correlation from 0.92065 to
+0.99965 and reduces residual RMS from 1124.64 to 76.52 counts. These are separate
+acquisitions and the residual includes noise and any processing differences.
+
+The earlier audit conflated the physical active area with OceanView's exported
+readout window. OceanView uses the first 3648 wire samples, including the initial
+non-active prefix. Version 1.5.2 returns raw[0:3648] and P(0)..P(3647) together.
+It retains all 3840 raw samples internally and extracts optical black before
+windowing. This supersedes both earlier active-window recommendations above.
+Simply relabeling a cropped array or applying a constant nm offset is incorrect.
+
+New detector metadata has activeStart=0 (legacy field name, now readout start).
+Historical activeStart=21 captures remain importable and are never silently
+rewritten. Factory-grid signatures prevent old alignment-profile reuse. Reacquire
+important measurements because cropped historical arrays lack the discarded
+first 21 raw samples. Automatic factory loading and enforced optical-black
+subtraction remain in place. Physical confirmation against OceanView remains
+required after deploying this update.

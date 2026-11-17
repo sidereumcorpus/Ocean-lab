@@ -1,5 +1,5 @@
-import { OceanOBPSpectrometer } from './ocean-obp.js?v=factory-2';
-import { USB4000Spectrometer } from './usb4000.js?v=factory-2';
+import { OceanOBPSpectrometer } from './ocean-obp.js?v=pixels-3';
+import { USB4000Spectrometer } from './usb4000.js?v=pixels-3';
 
 /** Choose protocol after the vendor-only chooser, before sending any commands. */
 export function createSpectrometerForDevice(device, options = {}) {

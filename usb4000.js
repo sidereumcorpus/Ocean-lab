@@ -1,4 +1,4 @@
-import { OceanOBPSpectrometer } from './ocean-obp.js?v=factory-2';
+import { OceanOBPSpectrometer } from './ocean-obp.js?v=pixels-3';
 
 /**
  * USB4000 legacy USB driver (VID 2457, PID 1022).
@@ -14,7 +14,7 @@ export class USB4000Spectrometer extends OceanOBPSpectrometer {
   constructor(options = {}) {
     super(options);
     this.profile = 'usb4000';
-    this.pixelCount = 3648; // 3840 wire samples; only 3648 optical active samples.
+    this.pixelCount = 3648; // OceanView-compatible first 3648 wire samples.
     this.lastRawSpectrum = null;
     this.opticalDarkPixels = null;
     this.autoscaleLevel = null;
@@ -277,12 +277,12 @@ export class USB4000Spectrometer extends OceanOBPSpectrometer {
       const result = new Uint16Array(3840), view = new DataView(data.buffer);
       for (let p = 0; p < result.length; p++) result[p] = view.getUint16(p*2,true);
       this.lastRawSpectrum = result;
-      // Manufacturer table is ONE-based: black 6..18, active 22..3669.
-      // Therefore JS black slice(5,18), active slice(21,3669). Index 18 is
-      // transitional, and slice(22,3670) would discard one active pixel.
+      // OceanView's exported window starts at raw index zero, not at the
+      // physical active-region boundary. Keep its dummy/black prefix so pixel
+      // numbers, wavelengths and intensities match the factory convention.
       this.opticalDarkPixels = result.slice(5,18);
       const gain = this.autoscaleLevel ? 65535 / this.autoscaleLevel : 1;
-      const active = result.slice(21,3669);
+      const active = result.slice(0,3648);
       for (let p=0;p<active.length;p++) active[p] = Math.min(65535,Math.round(active[p]*gain));
       this.pixelCount = active.length;
       return active;
@@ -299,12 +299,11 @@ export class USB4000Spectrometer extends OceanOBPSpectrometer {
         }
         this._coefficients = coefficients;
       }
-      // EEPROM coefficients use original wire-pixel coordinates. Cropping
-      // intensities must not restart the calibration polynomial at zero.
+      // Match OceanView: returned sample p is raw pixel p, wavelength P(p).
       const wavelengths = new Float64Array(3648);
       for (let p = 0; p < wavelengths.length; p++) {
         const c = this._coefficients;
-        const rawPixel = p + 21;
+        const rawPixel = p;
         wavelengths[p] = ((c[3]*rawPixel+c[2])*rawPixel+c[1])*rawPixel+c[0];
         if (!Number.isFinite(wavelengths[p])) throw new Error('Invalid wavelength polynomial.');
       }

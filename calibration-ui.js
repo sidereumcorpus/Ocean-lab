@@ -1,4 +1,4 @@
-import { findLinePeak, matchesCalibration, validateCalibration } from './calibration.js';
+import { findLinePeak, matchesCalibration, validateCalibration } from './calibration.js?v=pixels-3';
 const $=id=>document.getElementById(id);
 export class CalibrationPanel {
   constructor(callbacks) {

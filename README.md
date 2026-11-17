@@ -138,16 +138,18 @@ Normal trigger mode is set at connection. Supported exposure times are
 3800–65535000 µs in 10 µs increments. Shorter shutter-mode exposures are
 not implemented. Status readback verifies each integration-time command.
 
-The full USB wire readout contains **3840 uint16 samples**. The plot and new
-captures contain **3648 active samples**, using `raw.slice(21,3669)`.
-The manufacturer table uses one-based pixel numbers: optical active 22–3669,
-optical black 6–18 (`raw.slice(5,18)`). Do not include transitional JS index 18
-in the optical-black mean or shift the active window one pixel to the right.
-The wavelength polynomial evaluates original raw indices **21–3668** for the
-retained samples. Displayed active indices remain 0–3647. Restarting the
-polynomial at zero caused the 21-pixel left shift fixed in 1.5.1.
-Older 3840-sample captures remain readable, but their old alignment profiles
-cannot match the new grid; capture a new alignment profile.
+The full USB wire readout contains **3840 uint16 samples**. To match
+OceanView's factory export, new captures return the **first 3648 readout
+samples**, `raw.slice(0,3648)`, and wavelengths `P(0)` through `P(3647)`.
+This includes the initial dummy/black region; it is not a physical-active-only
+crop. The USB4000 manufacturer's physical active region starts at raw index
+21, but OceanView's exported pixel convention starts at zero. Cropping that
+prefix caused the observed 21-sample displacement. The 1.5.1 wavelength-only
+fix did not fix sample numbering; 1.5.2 fixes both together.
+Optical black remains `raw.slice(5,18)` and is extracted before windowing.
+Old saved captures keep their original data and processing metadata. Recreate
+alignment profiles for the changed factory grid; signatures prevent automatic
+reuse of profiles from an incompatible grid.
 
 High-speed USB reads the first 2048 bytes on IN endpoint 6, the remaining
 5632 bytes on IN endpoint 2, then consumes and checks the 0x69 synchronization
@@ -169,7 +171,7 @@ Slot 17 stores binary autonulling information. Its saturation uint16 is at
 Active counts are scaled by 65535/level, rounded to uint16 and clamped at
 65535; an unprogrammed zero level uses unity gain. The raw 3840-sample frame
 and black samples remain accessible as `lastRawSpectrum` and
-`opticalDarkPixels`. New saved captures retain saturation level, active start
+`opticalDarkPixels`. New saved captures retain saturation level, readout start
 and normalized optical-black mean in JSON and CSV processing metadata.
 
 In **Acquire → Dark, reference & spectroscopy**, capture dark with the source
@@ -271,8 +273,11 @@ Hardware compatibility and real USB behavior require testing with the target mod
 - .github/workflows/pages.yml — protocol and syntax checks; Pages uses the main branch root
 
 
-Version 1.5.1 automatically loads factory wavelengths on connection (including demo).
+Factory loading introduced in version 1.5.1 automatically loads factory wavelengths on connection (including demo).
 Use Reload factory wavelengths under device details only when needed. Previously
 saved captures retain their original axes; recapture affected measurements and
 recreate any alignment profiles made with the old, shifted factory grid. Grid
 signatures prevent those profiles from being applied to the corrected axis.
+
+Version 1.5.2 supersedes the 1.5.1 shifted-window convention: both sample p and
+factory wavelength P(p) now use original raw pixel p, matching OceanView.
