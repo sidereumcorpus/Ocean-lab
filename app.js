@@ -1,3 +1,4 @@
+import { initializeWorkspace } from "./ui.js";
 import { selectSpectrometer } from "./spectrometer.js";
 import { DatasetPanel, downloadFile } from "./dataset-ui.js?v=calibration-1";
 import { datasetCSV } from "./datasets.js?v=calibration-1";
@@ -30,6 +31,7 @@ function active() {
 }
 function update() {
   const connected = active();
+  $("deviceInfo").title = $("deviceInfo").textContent;
   const dataBusy = Boolean(collections?.busy);
   const legacy = connected && !state.demo && state.driver.profile === 'usb4000';
   const corrected = document.querySelector('#mode option[value="corrected"]');
@@ -464,6 +466,7 @@ canvas.addEventListener('click',event=>{
   }}
   calibration.pickPixel(pixel,f.captureId);
 });
+initializeWorkspace();
 update();
 draw();
 collections.init().then(()=>calibration.init(collections.store));

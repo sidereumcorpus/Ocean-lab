@@ -6,24 +6,74 @@
 <meta name="theme-color" content="#111820">
 <meta name="description" content="Browser-based Ocean Optics USB4000 and OBP spectrometer dashboard.">
 <title>Ocean Lab · Spectrometer</title>
-<link rel="stylesheet" href="./style.css?v=calibration-1">
-<script type="module" src="./app.js?v=calibration-1"></script>
+<link rel="stylesheet" href="./style.css?v=workspace-1">
+<script type="module" src="./app.js?v=workspace-1"></script>
 </head>
-<body>
-<main>
-<header><div><div class="eyebrow">OPTICAL INSTRUMENTATION</div>
-<h1>Ocean Lab<span class="muted"> / Spectrometer</span></h1></div>
-<div id="status" class="status" role="status">Disconnected</div></header>
-<div id="notice" role="status" aria-live="polite">Connect a USB4000 or OBP spectrometer, or explore a simulated spectrum in demo mode.</div>
-<div class="layout">
-<aside class="sidebar">
-<section class="panel"><h2>01 · Connection</h2><p class="muted">Ocean Optics / Ocean Insight</p>
-<div id="deviceInfo" class="muted">No instrument selected</div>
-<div class="buttons"><button id="connect" class="primary">Connect USB</button><button id="demo">Try demo</button><button id="disconnect" class="danger" disabled>Disconnect</button></div>
-<button id="deviceHelp" class="text-button" aria-haspopup="dialog">Device not found?</button>
-<details><summary>USB & protocol settings</summary>
-<p class="note">Auto detects USB4000 by its USB ID. OBP settings apply only to OBP instruments; USB4000 endpoint roles are automatic.</p>
-<fieldset id="settings">
+<body><main class="app-shell">
+<header class="app-header"><div class="brand"><div class="eyebrow">OCEAN LAB</div><h1>Spectrometer</h1></div><div class="device-identity"><div id="status" class="status" role="status">Disconnected</div><div id="deviceInfo" class="muted">No instrument selected</div></div>
+<div class="header-actions"><button id="connect" class="primary">Connect USB</button><button id="demo">Try demo</button><button id="disconnect" class="danger" disabled>Disconnect</button><button id="openSettings" aria-haspopup="dialog">Device settings</button><button id="deviceHelp" class="text-button" aria-haspopup="dialog">Device not found?</button></div></header>
+<div id="notice" role="status" aria-live="polite">Connect a USB4000 or OBP spectrometer, or try demo mode.</div>
+<div class="workspace"><section class="panel spectrum-panel" aria-label="Spectrum workspace">
+<div class="plot-head"><div><div class="eyebrow">SPECTRAL RESPONSE</div><h2>Intensity distribution</h2></div><div id="legend" class="legend">Awaiting acquisition</div></div>
+<div class="canvas-wrap"><canvas id="plot" role="img" aria-label="Spectrum intensity plot"></canvas>
+<div id="empty" class="empty"><strong>Your spectrum starts here.</strong><p>Capture a frame to inspect detector counts and locate the strongest peak.</p></div></div>
+<div id="cursor">Move over the plot to inspect a sample.</div>
+<div class="metrics"><div class="metric"><span>PIXELS</span><strong id="pixels">—</strong></div><div class="metric"><span>PEAK COUNTS</span><strong id="peak">—</strong></div><div class="metric"><span>PEAK POSITION</span><strong id="position">—</strong></div></div>
+<small id="frameInfo">No frame captured</small>
+<div class="capture-bar" aria-label="Capture controls"><div class="buttons"><button id="capture" class="primary" disabled>Capture</button><button id="live" disabled>Start live</button><button id="stop" class="danger" disabled>Stop</button></div><div class="buttons"><button id="saveFrame" disabled>Save frame</button><button id="export" disabled>Export CSV</button></div></div>
+</section>
+<aside class="control-dock" aria-label="Instrument workspace">
+<div class="workspace-tabs" role="tablist" aria-label="Workspace">
+<button id="tab-acquire" role="tab" aria-selected="true" aria-controls="pane-acquire" data-tab-group="workspace" data-tab="acquire">Acquire</button>
+<button id="tab-datasets" role="tab" aria-selected="false" aria-controls="pane-datasets" data-tab-group="workspace" data-tab="datasets" tabindex="-1">Datasets</button>
+<button id="tab-calibration" role="tab" aria-selected="false" aria-controls="pane-calibration" data-tab-group="workspace" data-tab="calibration" tabindex="-1">Calibrate</button>
+<button id="tab-activity" role="tab" aria-selected="false" aria-controls="pane-activity" data-tab-group="workspace" data-tab="activity" tabindex="-1">Activity</button>
+</div><section id="pane-acquire" class="tab-pane" role="tabpanel" aria-labelledby="tab-acquire" data-tab-panel="workspace" tabindex="0">
+<div class="pane-title"><div class="eyebrow">MEASUREMENT</div><h2>Acquisition</h2></div>
+<div class="grid2"><div><label for="integration">Integration time · µs</label><input id="integration" type="number" min="1" max="4294967295" step="1" value="100000"></div>
+<div><label for="mode">Spectrum</label><select id="mode"><option value="corrected">Corrected</option><option value="raw">Raw ADC</option></select></div></div>
+<label for="sampleLabel">Sample label · optional</label><input id="sampleLabel" maxlength="120" placeholder="e.g. Red filter · trial 1">
+<div class="option-card"><label class="check"><input id="autoSave" type="checkbox" checked> Save single captures to dataset</label>
+<label class="check"><input id="recordLive" type="checkbox"> Record live frames to dataset</label>
+<div id="recordingFields" hidden><div class="grid2"><div><label for="recordInterval">Save interval · seconds</label><input id="recordInterval" type="number" min="1" max="3600" step="1" value="1"></div><div><label for="recordLimit">Frames per recording</label><input id="recordLimit" type="number" min="1" max="2000" step="1" value="30"></div></div></div>
+<p id="recordState" class="note">Live mode is preview-only. Enable recording above to save a series.</p><small id="saveStatus" role="status"></small></div>
+<details><summary>Wavelength axis & device details</summary><div class="buttons"><button id="calibrate" disabled>Load factory wavelengths</button></div><p id="deviceNote" class="note">Wavelengths assume a full, unbinned detector readout.</p><p class="note">Stop finishes the current frame. Disconnect cancels USB immediately. Long exposures determine the actual recording interval.</p></details>
+<p class="pane-hint">Use the controls below the plot to capture or start live acquisition. Manage collections in <button class="inline-button" data-open-tab="datasets">Datasets</button>.</p>
+</section><section id="pane-datasets" class="tab-pane datasets-pane" role="tabpanel" aria-labelledby="tab-datasets" data-tab-panel="workspace" tabindex="0" hidden>
+<div class="plot-head"><div><div class="eyebrow">SAVED MEASUREMENTS</div><h2 id="datasetsHeading">Datasets</h2></div></div>
+<label for="datasetSelect">Active dataset</label><select id="datasetSelect" disabled><option value="">Loading datasets…</option></select>
+<details class="new-dataset-details"><summary>New dataset</summary><div class="new-dataset"><div><label for="datasetName">New dataset name</label><input id="datasetName" maxlength="120" placeholder="e.g. Filter transmission lab"></div><button id="createDataset" disabled>Create dataset</button></div></details>
+<details><summary>Dataset name & notes</summary><label for="datasetTitle">Dataset name</label><input id="datasetTitle" maxlength="120"><label for="datasetNotes">Experiment notes</label><textarea id="datasetNotes" rows="3" maxlength="10000" placeholder="Light source, sample, setup, observations…"></textarea><div class="buttons"><button id="saveDatasetDetails" disabled>Save details</button><button id="deleteDataset" class="danger" disabled>Delete dataset</button></div></details>
+<p id="datasetSummary" class="note">Loading…</p>
+<div class="table-wrap"><table><thead><tr><th>Capture</th><th>Source</th><th>Integration</th><th>Peak counts</th><th>Actions</th></tr></thead><tbody id="captureRows"><tr><td colspan="5">No saved captures yet.</td></tr></tbody></table></div>
+<small id="historyNote"></small>
+<div class="buttons dataset-exports"><button id="exportDataset" disabled>Export dataset CSV</button><button id="backupDataset" disabled>Backup JSON</button><button id="importDataset" disabled>Import JSON</button><input id="importFile" type="file" accept=".json,application/json" hidden></div>
+<p id="storageStatus" class="note">Opening local dataset storage…</p>
+</section><section id="pane-calibration" class="tab-pane" role="tabpanel" aria-labelledby="tab-calibration" data-tab-panel="workspace" tabindex="0" hidden>
+<div class="pane-title"><div class="eyebrow">WAVELENGTH AXIS</div><h2 id="alignmentHeading">Single-line alignment</h2></div>
+<div class="subtabs" role="tablist" aria-label="Calibration workflow">
+<button id="tab-cal-new" role="tab" aria-selected="true" aria-controls="cal-new" data-tab-group="calibration" data-tab="new">New alignment</button>
+<button id="tab-cal-saved" role="tab" aria-selected="false" aria-controls="cal-saved" data-tab-group="calibration" data-tab="saved" tabindex="-1">Saved profiles</button></div>
+<div id="cal-new" role="tabpanel" aria-labelledby="tab-cal-new" data-tab-panel="calibration">
+<p class="note">Capture an isolated known line, then click its peak on the plot.</p>
+<div class="buttons"><button id="captureReference" disabled>Capture reference</button><button id="showReference" disabled>Show reference</button></div>
+<div class="grid2"><div><label for="referenceNm">Known line · nm</label><input id="referenceNm" type="number" min="0.001" max="100000" step="any" placeholder="e.g. 546.074"></div><div><label for="peakSeed">Peak near pixel</label><input id="peakSeed" type="number" min="0" step="1" placeholder="Select on plot"></div></div>
+<details class="small-details"><summary>Peak detection options</summary><label for="peakRadius">Search radius · pixels</label><input id="peakRadius" type="number" min="2" max="100" step="1" value="12"></details>
+<div class="buttons"><button id="previewAlignment" disabled>Preview alignment</button></div>
+<div id="alignmentPreview" class="note" aria-live="polite">Capture an isolated reference line to start.</div>
+<label for="alignmentName">Profile name</label><input id="alignmentName" maxlength="120" placeholder="e.g. Mercury lamp · November">
+<div class="buttons"><button id="saveAlignment" class="primary" disabled>Save & use for new captures</button></div>
+</div>
+<div id="cal-saved" role="tabpanel" aria-labelledby="tab-cal-saved" data-tab-panel="calibration" hidden>
+<label for="alignmentProfiles">Matching saved profiles</label><select id="alignmentProfiles"><option value="">Choose matching profile</option></select>
+<div class="buttons"><button id="applyAlignment" disabled>Use selected profile</button><button id="factoryAlignment" disabled>Use factory calibration</button></div>
+<p class="note">Load factory wavelengths in Acquisition, or capture a reference, to find profiles for this instrument.</p></div>
+<p id="alignmentIdentity" class="note"></p><p id="alignmentStatus" class="calibration-status" role="status">Next captures: factory wavelengths (no alignment offset).</p>
+<details><summary>How alignment works</summary><p class="note">A single line corrects wavelength offset only, not spacing or curvature. Intensities and detector pixels stay unchanged. The reference uses factory wavelengths and is not automatically saved to a dataset.</p><p class="note">Profiles require matching serial number, source, readout size and factory grid. Demo profiles cannot align hardware. Changes apply to new captures only; saved data and device EEPROM are kept. Fractional peak digits do not indicate absolute accuracy.</p></details>
+</section><section id="pane-activity" class="tab-pane" role="tabpanel" aria-labelledby="tab-activity" data-tab-panel="workspace" tabindex="0" hidden><div class="plot-head"><h2>Session activity</h2><button id="clearLog">Clear</button></div><pre id="log" aria-live="off">Ready.</pre></section>
+</aside></div><footer>Local acquisition & storage · Export JSON backups for important measurements</footer></main>
+<dialog id="settingsDialog" aria-labelledby="settingsTitle"><div class="plot-head"><h2 id="settingsTitle">Device settings</h2><button id="closeSettings" aria-label="Close device settings">Close</button></div>
+<p class="note">Auto detects USB4000. OBP overrides apply only to OBP instruments. Endpoint fields can stay blank for USB4000.</p><fieldset id="settings">
 <label for="profile">Instrument profile</label><select id="profile"><option value="auto">Auto · USB4000 / OBP</option><option value="usb4000">USB4000 · legacy USB</option><option value="obp">OBP · STS uint16 profile</option></select>
 <label for="protocol">OBP protocol version · hexadecimal</label><input id="protocol" value="1100" spellcheck="false">
 <div class="grid2">
@@ -35,68 +85,7 @@
 <label for="corrected">Corrected command · hexadecimal</label><input id="corrected" value="00101000" spellcheck="false">
 <label for="raw">Raw command · hexadecimal</label><input id="raw" value="00101100" spellcheck="false">
 <label for="timeout">Minimum transaction timeout · seconds</label><input id="timeout" type="number" min="1" max="3600" value="15">
-</fieldset></details>
-<p class="note">Use a WebUSB-capable desktop browser over HTTPS or localhost. On Windows, bind the spectrometer to WinUSB using Zadig.</p>
-</section>
-<section class="panel"><h2>02 · Acquisition</h2>
-<label for="integration">Integration time · microseconds</label><input id="integration" type="number" min="1" max="4294967295" step="1" value="100000">
-<label for="mode">Spectrum</label><select id="mode"><option value="corrected">Corrected</option><option value="raw">Raw ADC</option></select>
-<label for="sampleLabel">Sample label · optional</label><input id="sampleLabel" maxlength="120" placeholder="e.g. Red filter · trial 1">
-<div class="buttons"><button id="capture" class="primary" disabled>Capture</button><button id="live" disabled>Start live</button><button id="stop" disabled>Stop</button></div>
-<div class="buttons"><button id="calibrate" disabled>Load factory wavelengths</button><button id="export" disabled>Export CSV</button></div>
-<p class="note">Stop finishes the current frame. Disconnect closes USB immediately.</p><p id="deviceNote" class="note">Wavelengths assume a full, unbinned detector readout.</p>
-</section>
-<section class="panel"><h2>03 · Collection settings</h2>
-<label class="check"><input id="autoSave" type="checkbox" checked> Save single captures to dataset</label>
-<label class="check"><input id="recordLive" type="checkbox"> Record live frames to dataset</label>
-<div class="grid2"><div><label for="recordInterval">Save interval · seconds</label><input id="recordInterval" type="number" min="1" max="3600" step="1" value="1"></div>
-<div><label for="recordLimit">Frames per recording</label><input id="recordLimit" type="number" min="1" max="2000" step="1" value="30"></div></div>
-<p id="recordState" class="note">Live preview is not recorded unless enabled below.</p>
-<p class="note">With recording enabled, Start live saves at the chosen interval and stops at the frame limit. Long exposures determine the actual interval.</p>
-<small id="saveStatus" role="status"></small>
-</section></aside>
-<div>
-<section class="panel">
-<div class="plot-head"><div><div class="eyebrow">SPECTRAL RESPONSE</div><h2>Intensity distribution</h2></div><div id="legend" class="legend">Awaiting acquisition</div></div>
-<div class="canvas-wrap"><canvas id="plot" role="img" aria-label="Spectrum intensity plot"></canvas>
-<div id="empty" class="empty"><strong>Your spectrum starts here.</strong><p>Capture a frame to inspect detector counts and locate the strongest peak.</p></div></div>
-<div id="cursor">Move over the plot to inspect a sample.</div>
-<div class="metrics"><div class="metric"><span>PIXELS</span><strong id="pixels">—</strong></div><div class="metric"><span>PEAK COUNTS</span><strong id="peak">—</strong></div><div class="metric"><span>PEAK POSITION</span><strong id="position">—</strong></div></div>
-<small id="frameInfo">No frame captured</small>
-</section>
-<section class="panel activity" aria-labelledby="alignmentHeading">
-<div class="eyebrow">WAVELENGTH CALIBRATION</div><h2 id="alignmentHeading">Single-line alignment</h2>
-<p class="note">Use an isolated emission line with a precisely known wavelength. One line corrects an offset only; it cannot correct wavelength spacing or curvature. Intensity samples stay unchanged.</p>
-<div class="buttons"><button id="captureReference" disabled>Capture reference</button><button id="showReference" disabled>Show reference</button></div>
-<p class="note">Reference capture uses the integration time above and factory wavelengths. It is not automatically saved to a dataset. Click your line on the plot or enter its pixel below.</p>
-<div class="calibration-fields"><div><label for="referenceNm">Known line wavelength · nm</label><input id="referenceNm" type="number" min="0.001" max="100000" step="any" placeholder="e.g. 546.074"></div>
-<div><label for="peakSeed">Peak near pixel</label><input id="peakSeed" type="number" min="0" step="1" placeholder="Select on plot"></div>
-<div><label for="peakRadius">Search radius · pixels</label><input id="peakRadius" type="number" min="2" max="100" step="1" value="12"></div></div>
-<div class="buttons"><button id="previewAlignment" disabled>Preview alignment</button></div>
-<div id="alignmentPreview" class="note" aria-live="polite">Capture an isolated reference line to start.</div>
-<label for="alignmentName">Calibration profile name</label><input id="alignmentName" maxlength="120" placeholder="e.g. Mercury lamp · November">
-<div class="buttons"><button id="saveAlignment" disabled>Save & use for new captures</button></div>
-<p id="alignmentIdentity" class="note"></p>
-<label for="alignmentProfiles">Saved profiles matching this instrument</label><select id="alignmentProfiles"><option value="">Choose matching profile</option></select>
-<div class="buttons"><button id="applyAlignment" disabled>Use selected profile</button><button id="factoryAlignment" disabled>Use factory calibration</button></div>
-<p id="alignmentStatus" class="calibration-status" role="status">Next captures: factory wavelengths (no alignment offset).</p>
-<p class="note">Profiles stay on this browser and require a matching serial number, readout size and factory wavelength grid. Demo profiles cannot be applied to hardware. Existing datasets and device EEPROM are never recalibrated by these controls. Fractional peak digits do not indicate absolute calibration accuracy.</p>
-</section>
-<section class="panel activity" aria-labelledby="datasetsHeading">
-<div class="plot-head"><div><div class="eyebrow">SAVED MEASUREMENTS</div><h2 id="datasetsHeading">Datasets</h2></div><button id="saveFrame" disabled>Save current frame</button></div>
-<label for="datasetSelect">Active dataset</label><select id="datasetSelect" disabled><option value="">Loading datasets…</option></select>
-<div class="new-dataset"><div><label for="datasetName">New dataset name</label><input id="datasetName" maxlength="120" placeholder="e.g. Filter transmission lab"></div><button id="createDataset" disabled>Create dataset</button></div>
-<details><summary>Dataset name & notes</summary><label for="datasetTitle">Dataset name</label><input id="datasetTitle" maxlength="120"><label for="datasetNotes">Experiment notes</label><textarea id="datasetNotes" rows="3" maxlength="10000" placeholder="Light source, sample, setup, observations…"></textarea><div class="buttons"><button id="saveDatasetDetails" disabled>Save details</button><button id="deleteDataset" class="danger" disabled>Delete dataset</button></div></details>
-<p id="datasetSummary" class="note">Loading…</p>
-<div class="table-wrap"><table><thead><tr><th>Capture</th><th>Source</th><th>Integration</th><th>Peak counts</th><th>Actions</th></tr></thead><tbody id="captureRows"><tr><td colspan="5">No saved captures yet.</td></tr></tbody></table></div>
-<small id="historyNote"></small>
-<div class="buttons"><button id="exportDataset" disabled>Export dataset CSV</button><button id="backupDataset" disabled>Backup JSON</button><button id="importDataset" disabled>Import JSON</button><input id="importFile" type="file" accept=".json,application/json" hidden></div>
-<p id="storageStatus" class="note">Opening local dataset storage…</p>
-</section>
-<section class="panel activity"><div class="plot-head"><h2>Session activity</h2><button id="clearLog">Clear</button></div><pre id="log" aria-live="off">Ready.</pre></section>
-</div></div>
-<footer>Client-side acquisition · No external dependencies · Demo data is simulated · Hardware profile must match instrument firmware</footer>
-</main>
+</fieldset></dialog>
 <dialog id="helpDialog" aria-labelledby="helpTitle">
 <div class="plot-head"><h2 id="helpTitle">Device not found?</h2><button id="closeHelp" aria-label="Close device help">Close</button></div>
 <p>For your <strong>Ocean Optics USB4000</strong>, Windows must use WinUSB to connect through this app.</p>
@@ -109,6 +98,4 @@
 <p class="note">Changing this driver can affect Ocean Optics desktop software on this computer. It does not change the instrument or another computer.</p>
 <details><summary>Still having trouble?</summary><ul><li>Use the HTTPS page, not a downloaded file opened with file://.</li><li>Try another USB cable or port. Check Device Manager for an error code.</li><li>If claiming the interface fails, close other software using the device, reconnect, and try again.</li><li>WinUSB and the USB4000 legacy profile are both required. OBP command fields cannot configure a USB4000.</li></ul></details>
 </dialog>
-</body>
-</html>
-
+</body></html>

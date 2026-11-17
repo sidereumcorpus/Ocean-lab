@@ -19,6 +19,22 @@ checks; verification is not a deployment gate. No package install or build is re
 Alternatively, serve the root folder with any local HTTP server.
 Do not open index.html through file://: ES module loading needs an HTTP origin.
 
+## Compact workspace (version 1.4)
+
+The spectrum, capture/live/stop controls, frame saving and frame CSV export stay
+visible while tabs switch the adjacent workspace:
+
+- **Acquire**: integration, sample labels, autosave and optional live recording.
+- **Datasets**: capture history, dataset details, backups and collection exports.
+- **Calibrate**: separate New alignment and Saved profiles subviews.
+- **Activity**: session log.
+
+Device settings and the driver-help guide open in dialogs from the header.
+The page fits the viewport on desktop; only the active pane or capture history
+scrolls when necessary. On narrow screens the plot sits above the tabbed controls.
+Arrow keys, Home and End navigate tabs; active tabs persist for the current browser
+session. Switching views never stops a live run or clears forms, profiles or data.
+
 ## Single-line wavelength alignment (version 1.3)
 
 1. Connect your spectrometer and illuminate it with an isolated spectral line
