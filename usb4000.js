@@ -1,4 +1,4 @@
-import { OceanOBPSpectrometer } from './ocean-obp.js?v=jaz-1';
+import { OceanOBPSpectrometer } from './ocean-obp.js?v=jaz-boot-2';
 
 /**
  * USB4000 legacy USB driver (VID 2457, PID 1022).

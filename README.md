@@ -321,3 +321,19 @@ against OceanView before relying on physical measurements.
 
 Sources: [Jaz OEM data sheet 013-RD000-000-05-201109, USB pp.14–23](https://www.rktech.hu/dokumentaciok/OceanOptics/Spectrometers/Jaz%20OEM%20Data%20Sheet.pdf)
 and [SeaBreeze JAZ configuration](https://python-seabreeze.readthedocs.io/en/latest/_modules/seabreeze/pyseabreeze/devices.html).
+
+### Jaz startup troubleshooting (1.6.1)
+
+Jaz must finish booting to its menu before USB acquisition. The driver now retries
+only a valid zero-valued C0 module-count reply, up to 20 queries separated by
+500 ms, under the transaction deadline. It reports startup progress in Session
+activity and reports the actual decimal/hex byte on failure. Unexpected bytes
+and extra reply data fail immediately rather than being guessed or ignored.
+Disconnect cancels the startup delay. No channel/EEPROM/spectrum command is sent
+unless a valid nonzero count has been received.
+
+If zero persists, restart Jaz, allowing 10–15 seconds off before powering it on,
+wait for the menu, and reconnect. Additional stack modules can require the
+approved Jaz external supply. A zero count is not proof that the module is
+broken, nor does retrying guarantee recovery. See the vendor's troubleshooting
+section: https://www.oceanoptics.com/wp-content/uploads/2024/12/Jaz-Installation-and-Operation-Instructions.pdf

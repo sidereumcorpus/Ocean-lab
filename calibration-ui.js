@@ -1,4 +1,4 @@
-import { findLinePeak, matchesCalibration, validateCalibration } from './calibration.js?v=jaz-1';
+import { findLinePeak, matchesCalibration, validateCalibration } from './calibration.js?v=jaz-boot-2';
 const $=id=>document.getElementById(id);
 export class CalibrationPanel {
   constructor(callbacks) {

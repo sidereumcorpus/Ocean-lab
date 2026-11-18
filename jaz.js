@@ -1,4 +1,4 @@
-import { USB4000Spectrometer } from './usb4000.js?v=jaz-1';
+import { USB4000Spectrometer } from './usb4000.js?v=jaz-boot-2';
 
 /** Ocean Optics Jaz USB, VID 2457 / PID 2000.
  * Shares the legacy session queue, bounded reads and EEPROM helpers, NOT the
@@ -10,6 +10,13 @@ import { USB4000Spectrometer } from './usb4000.js?v=jaz-1';
 export class JazSpectrometer extends USB4000Spectrometer {
   constructor(options = {}) {
     super(options);
+    this.onStatus=null;
+    this.startupAttempts=options.jazStartupAttempts??20;
+    this.startupRetryMs=options.jazStartupRetryMs??500;
+    if(!Number.isInteger(this.startupAttempts)||this.startupAttempts<1||this.startupAttempts>20||
+      !Number.isInteger(this.startupRetryMs)||this.startupRetryMs<1||this.startupRetryMs>500) {
+      throw new RangeError('Invalid Jaz startup retry settings.');
+    }
     this.profile='jaz';this.modelName='Jaz';this.productId=0x2000;
     this.readoutPixels=2048;this.pixelCount=2048;
     this.minIntegrationTime=1000;this.maxIntegrationTime=65530000;
@@ -30,11 +37,23 @@ export class JazSpectrometer extends USB4000Spectrometer {
   async _initializeDevice(session) {
     // Query count BEFORE legacy module commands: a stack without a spectrometer
     // makes those commands undefined. Do not send USB4000 FE or trigger 0A.
-    await this._write(session,Uint8Array.of(0xc0));
-    const count=(await this._readBytes(session,1,1))[0];
-    if(count<1||count>15)throw new Error('Jaz reports no valid spectrometer modules.');
+    let count=0;
+    for(let attempt=1;attempt<=this.startupAttempts;attempt++) {
+      this._checkSession(session);
+      await this._write(session,Uint8Array.of(0xc0));
+      count=(await this._readBytes(session,1,1))[0];
+      const hex='0x'+count.toString(16).padStart(2,'0');
+      if(this._buffers.get(1)?.length)throw new Error('Unexpected Jaz module-count reply length (first byte '+hex+'). Reconnect after Jaz reaches its menu screen.');
+      if(count>15)throw new Error('Unexpected Jaz module-count reply '+hex+' ('+count+'). Close other spectrometer software, wait for the Jaz menu screen, then reconnect.');
+      if(count>0)break;
+      if(attempt===this.startupAttempts) {
+        throw new Error('Jaz module count stayed at 0x00 (0) after '+attempt+' queries. Wait for the Jaz menu screen, check its approved power supply, then reconnect.');
+      }
+      this.onStatus?.('Jaz reports 0 modules; waiting for startup ('+attempt+'/'+this.startupAttempts+').');
+      await this._withCancellation(new Promise(resolve=>setTimeout(resolve,this.startupRetryMs)));
+      this._checkSession(session);
+    }
     if(this.channel>=count)throw new Error('Jaz channel '+this.channel+' unavailable; stack has '+count+' spectrometers.');
-    if(this._buffers.get(1)?.length)throw new Error('Unexpected Jaz module-count reply length.');
     this.channelCount=count;
     await this._write(session,Uint8Array.of(0xc1,this.channel));
     this.highSpeed=this._endpoints.get(2)>64; // descriptors, no USB4000 status.

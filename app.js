@@ -1,10 +1,10 @@
-import { SpectroscopySession, signalCounts, usesOpticalDark } from './spectroscopy.js?v=jaz-1';
+import { SpectroscopySession, signalCounts, usesOpticalDark } from './spectroscopy.js?v=jaz-boot-2';
 import { initializeWorkspace } from "./ui.js";
-import { selectSpectrometer } from "./spectrometer.js?v=jaz-1";
-import { DatasetPanel, downloadFile } from "./dataset-ui.js?v=jaz-1";
-import { datasetCSV } from "./datasets.js?v=jaz-1";
-import { gridSignature, alignGrid } from "./calibration.js?v=jaz-1";
-import { CalibrationPanel } from "./calibration-ui.js?v=jaz-1";
+import { selectSpectrometer } from "./spectrometer.js?v=jaz-boot-2";
+import { DatasetPanel, downloadFile } from "./dataset-ui.js?v=jaz-boot-2";
+import { datasetCSV } from "./datasets.js?v=jaz-boot-2";
+import { gridSignature, alignGrid } from "./calibration.js?v=jaz-boot-2";
+import { CalibrationPanel } from "./calibration-ui.js?v=jaz-boot-2";
 
 const $ = id => document.getElementById(id);
 const state = {
@@ -173,6 +173,10 @@ $("connect").addEventListener("click", () => run(async () => {
   // Keep connect before the first await; USB chooser needs user activation.
   const {driver,device} = await selectSpectrometer(driverOptions());
   state.driver = driver;
+  driver.onStatus=message=>{
+    if(state.driver!==driver||state.closing)return;
+    notify(message);log(message);
+  };
   driver.onDisconnect = () => {
     state.epoch++;
     state.live = false;

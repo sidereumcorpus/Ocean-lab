@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { JazSpectrometer } from '../jaz.js?v=jaz-1';
+import { JazSpectrometer } from '../jaz.js?v=jaz-boot-2';
 import { createSpectrometerForDevice } from '../spectrometer.js';
-import { USB4000Spectrometer } from '../usb4000.js?v=jaz-1';
+import { USB4000Spectrometer } from '../usb4000.js?v=jaz-boot-2';
 
-function mockJaz({highSpeed=true,chunk=Infinity,count=2,autoscale=65535,badEcho=false,stall=false}={}) {
+function mockJaz({highSpeed=true,chunk=Infinity,count=2,counts=null,autoscale=65535,badEcho=false,stall=false}={}) {
   const queues=new Map([[1,[]],[2,[]]]),writes=[],reads=[],listeners=new Set();
-  let channel=0,rejectRead;
+  let channel=0,rejectRead,countIndex=0;
   const packet=highSpeed?512:64;
   const endpoints=[{type:'bulk',direction:'out',endpointNumber:1,packetSize:packet},
     ...[1,2].map(endpointNumber=>({type:'bulk',direction:'in',endpointNumber,packetSize:packet}))];
@@ -21,7 +21,7 @@ function mockJaz({highSpeed=true,chunk=Infinity,count=2,autoscale=65535,badEcho=
     async transferOut(ep,bytes){
       assert.equal(ep,1);writes.push([...bytes]);
       switch(bytes[0]) {
-        case 0xc0: queues.get(1).push(Uint8Array.of(count));break;
+        case 0xc0: queues.get(1).push(Uint8Array.of(counts?counts[Math.min(countIndex++,counts.length-1)]:count));break;
         case 0xc1: channel=bytes[1];assert.ok(channel<count);break;
         case 0x02: assert.equal(bytes.length,5);break; // No ACK or status reply.
         case 0x05: {
@@ -63,7 +63,7 @@ async function setup(t,config={},options={}) {
   const mock=mockJaz(config),nav=Object.getOwnPropertyDescriptor(globalThis,'navigator'),secure=Object.getOwnPropertyDescriptor(globalThis,'isSecureContext');
   Object.defineProperty(globalThis,'navigator',{value:{usb:mock.usb},configurable:true});
   Object.defineProperty(globalThis,'isSecureContext',{value:true,configurable:true});
-  const d=new JazSpectrometer({startupDelayMs:0,timeoutMs:25,...options});
+  const d=new JazSpectrometer({startupDelayMs:0,timeoutMs:25,jazStartupAttempts:3,jazStartupRetryMs:1,...options});
   t.after(async()=>{await d.disconnect();if(mock.device.opened)await mock.device.close();
     if(nav)Object.defineProperty(globalThis,'navigator',nav);else delete globalThis.navigator;
     if(secure)Object.defineProperty(globalThis,'isSecureContext',secure);else delete globalThis.isSecureContext;});
@@ -120,7 +120,7 @@ for(const autoscale of [0,32768])test('Jaz slot 17 gain '+autoscale+' is normali
 for(const config of [{count:0},{count:1,channel:1},{badEcho:true}])test('invalid Jaz startup safely closes '+JSON.stringify(config),async t=>{
   const {d,device,writes}=await setup(t,config,{channel:config.channel||0});
   await assert.rejects(d.connect(device));assert.equal(device.opened,false);assert.equal(d.connected,false);
-  if(config.count===0)assert.deepEqual(writes,[[0xc0]]);
+  if(config.count===0)assert.deepEqual(writes,[[0xc0],[0xc0],[0xc0]]);
 });
 
 test('Jaz acquisition, exposure changes and EEPROM cannot interleave',async t=>{
@@ -148,4 +148,23 @@ test('Jaz disconnect cancels scan and queued operations and resets channel state
 test('Jaz blocked reads time out and close the USB session',async t=>{
   const {d,device}=await setup(t,{stall:true});await d.connect(device);d.integrationTime=null;
   await assert.rejects(d.getSpectrum(),/timed out/);assert.equal(device.opened,false);
+});
+
+test('Jaz startup retries only zero module-count queries until modules become ready',async t=>{
+  const {d,device,writes}=await setup(t,{counts:[0,0,2]});const statuses=[];d.onStatus=s=>statuses.push(s);
+  await d.connect(device);
+  assert.deepEqual(writes.slice(0,4),[[0xc0],[0xc0],[0xc0],[0xc1,0]]);
+  assert.equal(d.channelCount,2);assert.equal(statuses.length,2);
+});
+test('Jaz unexpected count is reported verbatim without blind retry or module commands',async t=>{
+  const {d,device,writes}=await setup(t,{count:255});
+  await assert.rejects(d.connect(device),/0xff \(255\)/);
+  assert.deepEqual(writes,[[0xc0]]);assert.equal(device.opened,false);
+});
+test('Jaz disconnect during boot delay prevents further USB queries',async t=>{
+  const {d,device,writes}=await setup(t,{count:0},{jazStartupRetryMs:50});
+  let entered;const ready=new Promise(resolve=>entered=resolve);d.onStatus=()=>entered();
+  const connection=d.connect(device);const rejected=assert.rejects(connection,/disconnected|session changed|cancelled/);
+  await ready;await d.disconnect();await rejected;
+  assert.deepEqual(writes,[[0xc0]]);assert.equal(device.opened,false);
 });

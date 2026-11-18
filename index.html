@@ -6,8 +6,8 @@
 <meta name="theme-color" content="#111820">
 <meta name="description" content="Browser-based Ocean Optics USB4000, Jaz and OBP spectrometer dashboard.">
 <title>Ocean Lab · Spectrometer</title>
-<link rel="stylesheet" href="./style.css?v=jaz-1">
-<script type="module" src="./app.js?v=jaz-1"></script>
+<link rel="stylesheet" href="./style.css?v=jaz-boot-2">
+<script type="module" src="./app.js?v=jaz-boot-2"></script>
 </head>
 <body><main class="app-shell">
 <header class="app-header"><div class="brand"><div class="eyebrow">OCEAN LAB</div><h1>Spectrometer</h1></div><div class="device-identity"><div id="status" class="status" role="status">Disconnected</div><div id="deviceInfo" class="muted">No instrument selected</div></div>
@@ -105,6 +105,7 @@
 <li>Choose <strong>WinUSB</strong> as the target driver, then <strong>Install Driver</strong> or <strong>Replace Driver</strong>. Change only the selected spectrometer's driver.</li>
 <li>Unplug and reconnect it. Open this page in Chrome or Edge, leave the profile on <strong>Auto</strong>, then click <strong>Connect USB</strong>.</li></ol>
 <p class="note">Changing this driver can affect Ocean Optics desktop software on this computer. It does not change the instrument or another computer.</p>
+<details><summary>Jaz reports no spectrometers?</summary><p>Wait until Jaz finishes booting and shows its menu screen, then connect. If power-cycling, wait 10–15 seconds before powering it back on. A stack with additional modules may need the approved Jaz external power supply. Close OceanView and other tabs using the instrument.</p><p class="note">The app retries a zero module count for a short startup window. If it still fails, copy the exact count or error from Session activity.</p></details>
 <details><summary>Still having trouble?</summary><ul><li>Use the HTTPS page, not a downloaded file opened with file://.</li><li>Try another USB cable or port. Check Device Manager for an error code.</li><li>If claiming the interface fails, close other software using the device, reconnect, and try again.</li><li>WinUSB and the matching legacy profile are required for USB4000/Jaz. OBP fields cannot configure these instruments.</li></ul></details>
 </dialog>
 </body></html>
