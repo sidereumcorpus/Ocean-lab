@@ -354,3 +354,34 @@ use the bounded boot retry path. This does not bypass module discovery.
 The on-device stack position (e.g. Module #2) is not automatically the zero-based
 USB spectrometer channel. Module serial numbers are read from EEPROM; no serial
 or firmware values from photographs are hard-coded into the driver.
+
+## USB dropout recovery (1.7.0)
+
+After an unexpected physical USB disconnect, Ocean Lab preserves the last frame
+and existing datasets, stops live/recording, and clears dark/reference captures.
+It debounces for 750 ms, queries already-authorized attached devices and tries to
+open a fresh driver session for the same VID/PID/USB serial. Duplicate serials
+are ambiguous and are not chosen automatically. Without a USB serial, only the
+same USBDevice object can be retried; a new object requires Connect USB.
+
+Recovery never invokes the permission chooser or resumes acquisition/recording.
+It restores the selected Jaz channel and last successfully configured integration
+time, verifies module serial identity, reloads factory wavelengths and uses the
+factory axis. Custom alignment is not silently re-enabled. The prior captured
+frame keeps its original data/axis. Take new dark/reference spectra before
+absorbance/transmittance measurements and explicitly restart capture/live.
+
+Reconnect attempts are serialized with UI work and limited to three fresh driver
+sessions per recovery run. The app polls briefly for reattachment; a matching
+USB connect event can restart waiting recovery. Retry USB retries the remembered
+device/settings without a chooser. Disconnect cancels recovery; choosing demo
+or another instrument forgets the target. A failed startup can also be retried
+with Retry USB. Protocol errors are logged, not ignored, and the failed USB
+transaction is never replayed inside an uncertain session.
+
+Software cannot repair a loose plug/socket. Try a snug cable and strain relief;
+if moving the socket disconnects multiple known-good cables, have the connector
+inspected. Do not rely on reconnection to make a mechanically unstable setup
+suitable for unattended acquisition. This recovery flow has mock tests; physical
+contact-bounce testing and browser/device identity behavior need validation on
+real hardware.

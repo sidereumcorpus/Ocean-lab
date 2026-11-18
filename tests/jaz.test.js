@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { JazSpectrometer } from '../jaz.js?v=jaz-echo-3';
+import { JazSpectrometer } from '../jaz.js?v=recovery-1';
 import { createSpectrometerForDevice } from '../spectrometer.js';
-import { USB4000Spectrometer } from '../usb4000.js?v=jaz-echo-3';
+import { USB4000Spectrometer } from '../usb4000.js?v=recovery-1';
 
 function mockJaz({highSpeed=true,chunk=Infinity,count=2,counts=null,echo=false,echoOnly=false,echoTogether=false,autoscale=65535,badEcho=false,stall=false}={}) {
   const queues=new Map([[1,[]],[2,[]]]),writes=[],reads=[],listeners=new Set();

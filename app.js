@@ -1,10 +1,11 @@
-import { SpectroscopySession, signalCounts, usesOpticalDark } from './spectroscopy.js?v=jaz-echo-3';
+import { USBRecovery } from './usb-recovery.js?v=recovery-1';
+import { SpectroscopySession, signalCounts, usesOpticalDark } from './spectroscopy.js?v=recovery-1';
 import { initializeWorkspace } from "./ui.js";
-import { selectSpectrometer } from "./spectrometer.js?v=jaz-echo-3";
-import { DatasetPanel, downloadFile } from "./dataset-ui.js?v=jaz-echo-3";
-import { datasetCSV } from "./datasets.js?v=jaz-echo-3";
-import { gridSignature, alignGrid } from "./calibration.js?v=jaz-echo-3";
-import { CalibrationPanel } from "./calibration-ui.js?v=jaz-echo-3";
+import { selectSpectrometer, createSpectrometerForDevice } from "./spectrometer.js?v=recovery-1";
+import { DatasetPanel, downloadFile } from "./dataset-ui.js?v=recovery-1";
+import { datasetCSV } from "./datasets.js?v=recovery-1";
+import { gridSignature, alignGrid } from "./calibration.js?v=recovery-1";
+import { CalibrationPanel } from "./calibration-ui.js?v=recovery-1";
 
 const $ = id => document.getElementById(id);
 const state = {
@@ -16,6 +17,7 @@ const ctx = canvas.getContext("2d");
 let plotBox = null;
 let collections;
 let calibration;
+let recovery;
 const spectroscopySession = new SpectroscopySession();
 let displayValues = null;
 function resetSpectroscopy() {
@@ -50,6 +52,7 @@ function active() {
 }
 function update() {
   const connected = active();
+  const recovering=Boolean(recovery?.running);
   $("deviceInfo").title = $("deviceInfo").textContent;
   const dataBusy = Boolean(collections?.busy);
   const legacy = connected && !state.demo && ['usb4000','jaz'].includes(state.driver.profile);
@@ -68,22 +71,24 @@ function update() {
     ? 'USB4000: 3840 wire samples → OceanView-compatible pixels 0–3647. Counts use factory saturation scaling. Electric dark correction is always on. Normal mode: 3800–65535000 µs, 10 µs increments.'
     : 'Wavelengths assume a full, unbinned detector readout.';
   $("status").textContent = state.closing ? "Disconnecting…"
+    : recovering ? "Reconnecting USB…"
     : state.demo ? "Demo · simulated"
     : state.driver && state.driver.connected ? "USB connected"
     : state.busy ? "Working…" : "Disconnected";
-  $("connect").disabled = connected || state.busy || dataBusy || state.closing ||
+  $("connect").disabled = connected || state.busy || dataBusy || state.closing || recovering ||
     !navigator.usb || !window.isSecureContext;
-  $("demo").disabled = connected || state.busy || dataBusy || state.closing;
-  $("disconnect").disabled = !connected || state.closing;
+  $("demo").disabled = connected || state.busy || dataBusy || state.closing || recovering;
+  $("disconnect").disabled = (!connected && !recovering && !recovery?.armed) || state.closing;
+  $("retryUSB").disabled = !recovery?.target || connected || recovering || state.busy || state.closing || dataBusy;
   ["capture","live","calibrate"].forEach(id => {
     $(id).disabled = !connected || state.busy || dataBusy || state.live || state.closing;
   });
   if(state.reviewing) $("calibrate").disabled=true;
   $("stop").disabled = !state.live;
   $("export").disabled = !state.frame;
-  $("integration").disabled = state.busy || state.live || state.closing;
-  $("mode").disabled = state.busy || state.live || state.closing;
-  $("settings").disabled = connected || state.busy || dataBusy || state.closing;
+  $("integration").disabled = state.busy || state.live || state.closing || recovering;
+  $("mode").disabled = state.busy || state.live || state.closing || recovering;
+  $("settings").disabled = connected || state.busy || dataBusy || state.closing || recovering;
   for(const id of ['captureDark','captureWhite']) $(id).disabled=!connected||state.busy||state.live||state.closing||dataBusy;
   // This is a read-only status indicator, never a processing toggle.
   $('opticalDark').disabled=true;
@@ -169,35 +174,57 @@ async function run(task) {
   }
 }
 
-$("connect").addEventListener("click", () => run(async () => {
-  // Keep connect before the first await; USB chooser needs user activation.
-  const {driver,device} = await selectSpectrometer(driverOptions());
+async function openHardwareSession(driver,device,{recovered=false,integration=null,moduleSerial='',signal=null}={}) {
   state.driver = driver;
   driver.onStatus=message=>{
     if(state.driver!==driver||state.closing)return;
     notify(message);log(message);
   };
   driver.onDisconnect = () => {
+    if(state.driver!==driver)return;
     state.epoch++;
     state.live = false;
     calibration.reset();
     resetSpectroscopy();
+    state.wavelengths=null;state.factorySignature=null;
     $("deviceInfo").textContent = "Instrument unplugged";
     notify("Instrument unplugged. Reconnect to continue.", true);
-    log("USB device removed.");
-    update();
+    log("USB device removed. Acquisition paused; dark/reference cleared.");
+    draw();update();
+    void recovery?.start();
   };
+  const check=()=>{if(signal?.aborted)throw new Error('USB recovery cancelled.');};
+  const cancel=()=>{void driver.disconnect().catch(()=>{});};
+  signal?.addEventListener('abort',cancel,{once:true});
+  try {
+  check();
   await driver.connect(device);
+  check();
+  if(recovered&&moduleSerial&&(driver.serialNumber||device.serialNumber||'')!==moduleSerial) {
+    throw new Error('Spectrometer module identity changed; choose Connect USB to select it explicitly.');
+  }
   state.demo = false;
   state.epoch++;
-  clearFrame();
+  if(!recovered)clearFrame();
+  else {
+    state.wavelengths=null;state.factorySignature=null;
+    calibration.reset();resetSpectroscopy();
+  }
   // Capture controls remain busy until EEPROM coefficients and grid identity
   // are loaded. A failure is explicit; never silently acquire a pixel-only axis.
   try {
-    if(!await loadFactoryWavelengths())return;
+    if(!await loadFactoryWavelengths())throw new Error('USB session changed while loading factory wavelengths.');
+    check();
+    if(recovered&&integration!==null)await driver.setIntegrationTime(integration);
+    check();
   } catch(error) {
     await driver.disconnect();
     throw error;
+  }
+  check();
+  if(!recovered) {
+    recovery?.setIntegration(driver.integrationTime);
+    recovery?.setModuleSerial(driver.serialNumber||device.serialNumber||'');
   }
   const d = driver.device;
   $("deviceInfo").textContent =
@@ -207,9 +234,23 @@ $("connect").addEventListener("click", () => run(async () => {
   notify(['usb4000','jaz'].includes(driver.profile)
     ? driver.modelName+' ready. Factory wavelengths loaded; electric dark correction is always on. Capture to begin.'
     : 'OBP ready. Factory wavelengths loaded. Set integration time and capture a spectrum.');
+  } catch(error) {
+    await driver.disconnect().catch(()=>{});
+    throw error;
+  } finally {signal?.removeEventListener('abort',cancel);}
+}
+
+$('connect').addEventListener('click',()=>run(async()=>{
+  const options=driverOptions();
+  // requestDevice remains inside the user's click gesture.
+  const {driver,device}=await selectSpectrometer(options);
+  recovery?.remember(device,{options,integration:null});
+  await openHardwareSession(driver,device);
 }));
+$('retryUSB').addEventListener('click',()=>{void recovery?.start().finally(update);});
 
 $("demo").addEventListener("click", () => {
+  recovery?.forget();
   state.demo = true;
   state.driver = null;
   state.epoch++;
@@ -224,6 +265,7 @@ $("demo").addEventListener("click", () => {
 $("disconnect").addEventListener("click", async () => {
   if (state.closing) return;
   state.closing = true;
+  recovery?.forget();
   state.live = false;
   state.epoch++;
   state.demo = false;
@@ -250,6 +292,7 @@ async function prepare(config) {
   if (!state.demo && state.driver.integrationTime !== config.integration) {
     resetSpectroscopy();
     await state.driver.setIntegrationTime(config.integration);
+    recovery?.setIntegration(config.integration);
   }
 }
 function demoSpectrum(integration, raw) {
@@ -540,6 +583,19 @@ for(const [id,kind] of [['captureDark','dark'],['captureWhite','reference']]) {
     draw();notify(kind==='dark'?'Dark captured. Unblock the source for the reference.':'Reference captured. Insert the sample for measurement.');
   }));
 }
+if(navigator.usb)recovery=new USBRecovery({
+  usb:navigator.usb,
+  onSettled:update,
+  canAttempt:()=>!state.busy&&!state.closing&&!collections?.busy,
+  onStatus:message=>{notify(message);log(message);update();},
+  attempt:async(device,{options,integration,moduleSerial},signal)=>{
+    if(signal.aborted)throw new Error('USB recovery cancelled.');
+    const driver=createSpectrometerForDevice(device,options);
+    state.busy=true;update();
+    try {await openHardwareSession(driver,device,{recovered:true,integration,moduleSerial,signal});}
+    finally {state.busy=false;update();}
+  }
+});
 initializeWorkspace();
 update();
 draw();
