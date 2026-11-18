@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { JazSpectrometer } from '../jaz.js?v=recovery-1';
+import { JazSpectrometer } from '../jaz.js?v=disconnect-1';
 import { createSpectrometerForDevice } from '../spectrometer.js';
-import { USB4000Spectrometer } from '../usb4000.js?v=recovery-1';
+import { USB4000Spectrometer } from '../usb4000.js?v=disconnect-1';
 
 function mockJaz({highSpeed=true,chunk=Infinity,count=2,counts=null,echo=false,echoOnly=false,echoTogether=false,autoscale=65535,badEcho=false,stall=false}={}) {
   const queues=new Map([[1,[]],[2,[]]]),writes=[],reads=[],listeners=new Set();
@@ -192,4 +192,54 @@ test('Jaz repeated command byte is not accepted as a count',async t=>{
   const {d,device,writes}=await setup(t,{echo:true,count:0xc0});
   await assert.rejects(d.connect(device),/0xc0 \(192\).*after echo/);
   assert.deepEqual(writes,[[0xc0]]);assert.equal(device.opened,false);
+});
+
+test('normal Jaz disconnect drains the complete spectrum before release and close, skipping queued commands',async t=>{
+  const {d,device,writes}=await setup(t);await d.connect(device);
+  const trace=[],read=device.transferIn.bind(device),close=device.close.bind(device);
+  let entered,finish;const started=new Promise(resolve=>entered=resolve);
+  device.transferIn=async(ep,length)=>{
+    if(ep===2){entered();await new Promise(resolve=>finish=resolve);trace.push('spectrum received');}
+    return read(ep,length);
+  };
+  device.releaseInterface=async number=>{assert.equal(number,0);trace.push('release');};
+  device.close=async()=>{trace.push('close');return close();};
+  const scan=d.getSpectrum();await started;
+  const count=writes.length;
+  const queued=assert.rejects(d.setIntegrationTime(200000),/disconnected|session changed/);
+  const closing=d.disconnectGracefully();
+  assert.equal(d.connected,false);assert.equal(d._draining,true);
+  await new Promise(resolve=>setTimeout(resolve,5));assert.deepEqual(trace,[]);
+  assert.equal(writes.length,count);
+  finish();assert.equal((await scan).length,2048);await queued;
+  assert.deepEqual(await closing,{forced:false});
+  assert.deepEqual(trace,['spectrum received','release','close']);
+  assert.equal(writes.length,count);assert.equal(d._draining,false);
+});
+
+test('graceful Jaz disconnect forces closure at a bounded deadline if spectrum never arrives',async t=>{
+  const {d,device}=await setup(t,{stall:true});await d.connect(device);
+  const scan=assert.rejects(d.getSpectrum(),/deadline|disconnected|session changed|closed/);
+  await new Promise(resolve=>setTimeout(resolve,2));
+  assert.deepEqual(await d.disconnectGracefully({timeoutMs:5}),{forced:true});
+  await scan;assert.equal(device.opened,false);assert.equal(d._draining,false);
+});
+
+test('Force disconnect interrupts graceful wait without sending extra Jaz commands',async t=>{
+  const {d,device,writes}=await setup(t,{stall:true});await d.connect(device);
+  const scan=assert.rejects(d.getSpectrum(),/forced|disconnected|session changed|closed/);
+  await new Promise(resolve=>setTimeout(resolve,2));const count=writes.length;
+  const graceful=d.disconnectGracefully();await d.disconnect(new Error('forced disconnect'));
+  await scan;assert.deepEqual(await graceful,{forced:true});
+  assert.equal(writes.length,count);assert.equal(device.opened,false);
+});
+
+test('idle Jaz disconnect releases interface, closes and is idempotent',async t=>{
+  const {d,device,writes}=await setup(t);await d.connect(device);const trace=[];
+  device.releaseInterface=async n=>trace.push('release '+n);
+  const close=device.close.bind(device);device.close=async()=>{trace.push('close');await close();};
+  const count=writes.length;
+  assert.deepEqual(await d.disconnectGracefully(),{forced:false});
+  assert.deepEqual(await d.disconnectGracefully(),{forced:false});
+  assert.deepEqual(trace,['release 0','close']);assert.equal(writes.length,count);
 });

@@ -6,12 +6,12 @@
 <meta name="theme-color" content="#111820">
 <meta name="description" content="Browser-based Ocean Optics USB4000, Jaz and OBP spectrometer dashboard.">
 <title>Ocean Lab · Spectrometer</title>
-<link rel="stylesheet" href="./style.css?v=recovery-1">
-<script type="module" src="./app.js?v=recovery-1"></script>
+<link rel="stylesheet" href="./style.css?v=disconnect-1">
+<script type="module" src="./app.js?v=disconnect-1"></script>
 </head>
 <body><main class="app-shell">
 <header class="app-header"><div class="brand"><div class="eyebrow">OCEAN LAB</div><h1>Spectrometer</h1></div><div class="device-identity"><div id="status" class="status" role="status">Disconnected</div><div id="deviceInfo" class="muted">No instrument selected</div></div>
-<div class="header-actions"><button id="connect" class="primary">Connect USB</button><button id="retryUSB" disabled>Retry USB</button><button id="demo">Try demo</button><button id="disconnect" class="danger" disabled>Disconnect</button><button id="openSettings" aria-haspopup="dialog">Device settings</button><button id="deviceHelp" class="text-button" aria-haspopup="dialog">Device not found?</button></div></header>
+<div class="header-actions"><button id="connect" class="primary">Connect USB</button><button id="retryUSB" disabled>Retry USB</button><button id="demo">Try demo</button><button id="disconnect" class="danger" disabled>Disconnect</button><button id="forceDisconnect" class="danger" hidden disabled>Force disconnect</button><button id="openSettings" aria-haspopup="dialog">Device settings</button><button id="deviceHelp" class="text-button" aria-haspopup="dialog">Device not found?</button></div></header>
 <div id="notice" role="status" aria-live="polite">Connect a USB4000, Jaz or OBP spectrometer, or try demo mode.</div>
 <div class="workspace"><section class="panel spectrum-panel" aria-label="Spectrum workspace">
 <div class="plot-head"><div><div class="eyebrow">SPECTRAL RESPONSE</div><h2>Intensity distribution</h2></div><div id="legend" class="legend">Awaiting acquisition</div></div>
@@ -45,7 +45,7 @@
 <label class="check"><input id="recordLive" type="checkbox"> Record live frames to dataset</label>
 <div id="recordingFields" hidden><div class="grid2"><div><label for="recordInterval">Save interval · seconds</label><input id="recordInterval" type="number" min="1" max="3600" step="1" value="1"></div><div><label for="recordLimit">Frames per recording</label><input id="recordLimit" type="number" min="1" max="2000" step="1" value="30"></div></div></div>
 <p id="recordState" class="note">Live mode is preview-only. Enable recording above to save a series.</p><small id="saveStatus" role="status"></small></div>
-<details><summary>Wavelength axis & device details</summary><div class="buttons"><button id="calibrate" disabled>Reload factory wavelengths</button></div><p id="deviceNote" class="note">Wavelengths assume a full, unbinned detector readout.</p><p class="note">Stop finishes the current frame. Disconnect cancels USB immediately. Long exposures determine the actual recording interval.</p></details>
+<details><summary>Wavelength axis & device details</summary><div class="buttons"><button id="calibrate" disabled>Reload factory wavelengths</button></div><p id="deviceNote" class="note">Wavelengths assume a full, unbinned detector readout.</p><p class="note">Stop finishes the current frame. Disconnect finishes the pending USB response, then releases the interface. Force disconnect aborts a stuck response. Long exposures determine the actual recording interval.</p></details>
 <p class="pane-hint">Use the controls below the plot to capture or start live acquisition. Manage collections in <button class="inline-button" data-open-tab="datasets">Datasets</button>.</p>
 </section><section id="pane-datasets" class="tab-pane datasets-pane" role="tabpanel" aria-labelledby="tab-datasets" data-tab-panel="workspace" tabindex="0" hidden>
 <div class="plot-head"><div><div class="eyebrow">SAVED MEASUREMENTS</div><h2 id="datasetsHeading">Datasets</h2></div></div>

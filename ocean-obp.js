@@ -44,6 +44,9 @@ export class OceanOBPSpectrometer {
     this._sequence = 0;
     this._connecting = false;
     this._closing = null;
+    this._draining = false;
+    this._gracefulClosing = null;
+    this._claimedInterface = null;
     this._rx = new Uint8Array(0);
     this._coefficients = null;
     this.pixelCount = null;
@@ -59,7 +62,7 @@ export class OceanOBPSpectrometer {
   }
 
   get connected() {
-    return Boolean(this.device && this.device.opened && !this._closing && !this._connecting);
+    return Boolean(this.device && this.device.opened && !this._closing && !this._connecting && !this._draining);
   }
 
   /** Invoke directly from a user gesture to preserve USB chooser activation. */
@@ -68,7 +71,7 @@ export class OceanOBPSpectrometer {
         !globalThis.isSecureContext) {
       throw new Error("WebUSB requires a supported browser and HTTPS or localhost.");
     }
-    if (this.device || this._connecting || this._closing) {
+    if (this.device || this._connecting || this._closing || this._draining) {
       throw new Error("A connection operation is already active.");
     }
     this._usb = navigator.usb;
@@ -137,6 +140,7 @@ export class OceanOBPSpectrometer {
       await new Promise(resolve => setTimeout(resolve, this.options.startupDelayMs));
       check();
       this.device = device;
+      this._claimedInterface = claimed;
       this._in = input.endpointNumber;
       this._out = output.endpointNumber;
       this._packetSize = input.packetSize;
@@ -161,10 +165,61 @@ export class OceanOBPSpectrometer {
     this._sessionController = new AbortController();
     this._generation++;
     this.device = null;
+    this._claimedInterface = null;
     this._rx = new Uint8Array(0);
     this._coefficients = null;
     this.pixelCount = null;
     this.integrationTime = null;
+  }
+
+  /** Normal user disconnect: deny new/queued commands, let the already-running
+   * response finish, then release and close. No device-specific eject command.
+   * Fatal transport errors and physical removal still use immediate disconnect.
+   */
+  async disconnectGracefully({timeoutMs} = {}) {
+    if(this._gracefulClosing)return this._gracefulClosing;
+    const device=this.device,generation=this._generation,iface=this._claimedInterface;
+    if(!device)return {forced:false};
+    if(this._connecting) {await this.disconnect();return {forced:true};}
+    const deadlineMs=timeoutMs ?? Math.max(this.options.timeoutMs,
+      this.integrationTime===null?0:this.integrationTime/1000+5000);
+    if(!Number.isFinite(deadlineMs)||deadlineMs<1||deadlineMs>0x7fffffff)throw new RangeError('Invalid disconnect timeout.');
+    this._draining=true;
+    const pending=this._tail;
+    this._gracefulClosing=(async()=>{
+      let timer;
+      try {
+        const drained=await Promise.race([
+          pending.then(()=>true,()=>true),
+          new Promise(resolve=>{timer=setTimeout(()=>resolve(false),deadlineMs);})
+        ]);
+        clearTimeout(timer);
+        if(!drained) {
+          await this.disconnect(new Error('USB response did not finish before disconnect deadline.'));
+          return {forced:true};
+        }
+        // An error/physical removal may have closed the session during the wait.
+        if(this.device!==device||this._generation!==generation)return {forced:true};
+        try {
+          if(device.opened&&iface!==null) {
+            await Promise.race([
+              device.releaseInterface(iface),
+              new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('USB interface release timed out.')),5000);})
+            ]);
+          }
+        } catch(error) {
+          await this.disconnect(error);
+          throw error;
+        } finally {clearTimeout(timer);}
+        // Close only our captured session, never a later reopened device.
+        if(this.device!==device||this._generation!==generation)return {forced:true};
+        await this.disconnect();
+        return {forced:false};
+      } finally {
+        clearTimeout(timer);this._draining=false;this._gracefulClosing=null;
+      }
+    })();
+    return this._gracefulClosing;
   }
 
   /** Close immediately rather than waiting behind a possibly blocked read. */

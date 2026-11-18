@@ -1,4 +1,4 @@
-import { findLinePeak, matchesCalibration, validateCalibration } from './calibration.js?v=recovery-1';
+import { findLinePeak, matchesCalibration, validateCalibration } from './calibration.js?v=disconnect-1';
 const $=id=>document.getElementById(id);
 export class CalibrationPanel {
   constructor(callbacks) {

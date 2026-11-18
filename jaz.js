@@ -1,4 +1,4 @@
-import { USB4000Spectrometer } from './usb4000.js?v=recovery-1';
+import { USB4000Spectrometer } from './usb4000.js?v=disconnect-1';
 
 /** Ocean Optics Jaz USB, VID 2457 / PID 2000.
  * Shares the legacy session queue, bounded reads and EEPROM helpers, NOT the

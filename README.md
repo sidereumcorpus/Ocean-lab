@@ -116,7 +116,7 @@ frame available for individual CSV export.
 - Leave **Instrument profile → Auto** for USB4000; its USB ID selects the legacy driver automatically.
 - Set integration time in microseconds. USB4000 offers device counts; OBP offers corrected or raw data.
 - **Capture** acquires one frame. **Start live** serializes repeated frames.
-- **Stop** finishes the pending frame. **Disconnect** cancels USB immediately.
+- **Stop** finishes the pending frame. **Disconnect** drains the current response and releases USB; **Force disconnect** aborts a stalled response.
 - **Load wavelengths** reads calibration coefficients from the instrument.
 - **Export CSV** exports the displayed frame and its acquisition metadata.
   Wavelength cells remain blank until calibration is loaded.
@@ -385,3 +385,25 @@ inspected. Do not rely on reconnection to make a mechanically unstable setup
 suitable for unattended acquisition. This recovery flow has mock tests; physical
 contact-bounce testing and browser/device identity behavior need validation on
 real hardware.
+
+
+## Graceful manual disconnect (1.7.1)
+
+The normal Disconnect button first stops scheduling acquisitions and cancels
+recovery. It blocks new/queued driver operations, waits for the already-running
+USB response to finish, explicitly releases the claimed interface, then closes
+USB. For Jaz that includes all 4096 spectral bytes; for USB4000 it includes the
+trailing 0x69 sync byte. This fixes our prior host-side race that could abort Jaz
+while its firmware was transmitting. Whether that race caused a particular
+unit's lockup still requires a hardware check.
+
+The wait is bounded by the configured transaction timeout or integration time
+plus 5 seconds, whichever is greater. Interface release is separately bounded.
+Force disconnect appears during the wait and closes immediately. Timeouts,
+physical removal and transport errors can still require forced teardown; the UI
+warns that the device may need a restart. Last-frame data and datasets are kept.
+
+The public disconnect() method remains immediate for fatal-error handling.
+Application-initiated normal teardown uses disconnectGracefully(). The Jaz OEM
+USB command table specifies no eject command and marks 04 Set Shutdown Mode as
+ignored. We do not send guessed shutdown, lamp or reset commands on normal exit.

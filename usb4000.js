@@ -1,4 +1,4 @@
-import { OceanOBPSpectrometer } from './ocean-obp.js?v=recovery-1';
+import { OceanOBPSpectrometer } from './ocean-obp.js?v=disconnect-1';
 
 /**
  * USB4000 legacy USB driver (VID 2457, PID 1022).
@@ -33,7 +33,7 @@ export class USB4000Spectrometer extends OceanOBPSpectrometer {
     if (typeof navigator === 'undefined' || !navigator.usb || !globalThis.isSecureContext) {
       throw new Error('WebUSB requires a supported browser and HTTPS or localhost.');
     }
-    if (this.device || this._connecting || this._closing) {
+    if (this.device || this._connecting || this._closing || this._draining) {
       throw new Error('A connection operation is already active.');
     }
     this._usb = navigator.usb;
@@ -86,6 +86,7 @@ export class USB4000Spectrometer extends OceanOBPSpectrometer {
       await new Promise(resolve => setTimeout(resolve, this.options.startupDelayMs));
       check();
       this.device = device;
+      this._claimedInterface = claimed;
       this._buffers.clear();
       this._usb.addEventListener('disconnect', this._removed);
       this._endpoints = new Map(chosen.alt.endpoints.filter(ep =>

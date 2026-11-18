@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { USB4000Spectrometer } from '../usb4000.js?v=recovery-1';
-import { OceanOBPSpectrometer } from '../ocean-obp.js?v=recovery-1';
+import { USB4000Spectrometer } from '../usb4000.js?v=disconnect-1';
+import { OceanOBPSpectrometer } from '../ocean-obp.js?v=disconnect-1';
 import { createSpectrometerForDevice, selectSpectrometer } from '../spectrometer.js';
 
 const view = bytes => new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
@@ -273,4 +273,20 @@ test('public commands are rejected while connection initialization owns endpoint
   await assert.rejects(d.getSpectrum(),/initializing/);
   await assert.rejects(d.setIntegrationTime(200000),/initializing/);
   assert.equal(d.connected,false);assert.equal(writes.length,count);d._connecting=false;
+});
+
+test('graceful USB4000 disconnect consumes trailing sync before release and close',async t=>{
+  const {d,device}=await connect(t);const trace=[];
+  const read=device.transferIn.bind(device),close=device.close.bind(device);
+  let arrived,finish;const atSync=new Promise(resolve=>arrived=resolve);
+  device.transferIn=async(ep,length)=>{
+    if(ep===2&&length===512) {arrived();await new Promise(resolve=>finish=resolve);trace.push('sync');}
+    return read(ep,length);
+  };
+  device.releaseInterface=async()=>trace.push('release');
+  device.close=async()=>{trace.push('close');return close();};
+  const scan=d.getSpectrum();await atSync;const closing=d.disconnectGracefully();
+  await new Promise(resolve=>setTimeout(resolve,2));assert.deepEqual(trace,[]);
+  finish();await scan;assert.deepEqual(await closing,{forced:false});
+  assert.deepEqual(trace,['sync','release','close']);
 });

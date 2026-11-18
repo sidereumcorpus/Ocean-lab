@@ -1,16 +1,16 @@
-import { USBRecovery } from './usb-recovery.js?v=recovery-1';
-import { SpectroscopySession, signalCounts, usesOpticalDark } from './spectroscopy.js?v=recovery-1';
+import { USBRecovery } from './usb-recovery.js?v=disconnect-1';
+import { SpectroscopySession, signalCounts, usesOpticalDark } from './spectroscopy.js?v=disconnect-1';
 import { initializeWorkspace } from "./ui.js";
-import { selectSpectrometer, createSpectrometerForDevice } from "./spectrometer.js?v=recovery-1";
-import { DatasetPanel, downloadFile } from "./dataset-ui.js?v=recovery-1";
-import { datasetCSV } from "./datasets.js?v=recovery-1";
-import { gridSignature, alignGrid } from "./calibration.js?v=recovery-1";
-import { CalibrationPanel } from "./calibration-ui.js?v=recovery-1";
+import { selectSpectrometer, createSpectrometerForDevice } from "./spectrometer.js?v=disconnect-1";
+import { DatasetPanel, downloadFile } from "./dataset-ui.js?v=disconnect-1";
+import { datasetCSV } from "./datasets.js?v=disconnect-1";
+import { gridSignature, alignGrid } from "./calibration.js?v=disconnect-1";
+import { CalibrationPanel } from "./calibration-ui.js?v=disconnect-1";
 
 const $ = id => document.getElementById(id);
 const state = {
   driver: null, demo: false, busy: false, live: false,
-  closing: false, epoch: 0, frame: null, wavelengths: null, frames: 0, reviewing: false, factorySignature: null
+  closing: false, forceClosing: false, epoch: 0, frame: null, wavelengths: null, frames: 0, reviewing: false, factorySignature: null
 };
 const canvas = $("plot");
 const ctx = canvas.getContext("2d");
@@ -79,6 +79,8 @@ function update() {
     !navigator.usb || !window.isSecureContext;
   $("demo").disabled = connected || state.busy || dataBusy || state.closing || recovering;
   $("disconnect").disabled = (!connected && !recovering && !recovery?.armed) || state.closing;
+  $('forceDisconnect').hidden=!state.closing || !state.driver?._draining;
+  $('forceDisconnect').disabled=!state.closing || !state.driver?._draining || state.forceClosing;
   $("retryUSB").disabled = !recovery?.target || connected || recovering || state.busy || state.closing || dataBusy;
   ["capture","live","calibrate"].forEach(id => {
     $(id).disabled = !connected || state.busy || dataBusy || state.live || state.closing;
@@ -265,6 +267,7 @@ $("demo").addEventListener("click", () => {
 $("disconnect").addEventListener("click", async () => {
   if (state.closing) return;
   state.closing = true;
+  state.forceClosing=false;
   recovery?.forget();
   state.live = false;
   state.epoch++;
@@ -274,9 +277,14 @@ $("disconnect").addEventListener("click", async () => {
   state.wavelengths=null;state.factorySignature=null;
   update();
   try {
-    if (state.driver) await state.driver.disconnect();
-    notify("Disconnected. The last captured frame remains available for export.");
-    log("Session disconnected.");
+    notify('Disconnecting: waiting for the current USB response to finish…');
+    const closing=state.driver?state.driver.disconnectGracefully():Promise.resolve({forced:false});
+    update();
+    const result=await closing;
+    notify(result.forced||state.forceClosing
+      ? 'USB was force-closed before a clean handoff. If Jaz is unresponsive, restart it before reconnecting.'
+      : 'Disconnected cleanly. The last captured frame remains available for export.');
+    log(result.forced||state.forceClosing?'USB force-closed.':'USB response drained, interface released and session closed.');
   } catch (error) {
     notify("USB close failed: " + error.message, true);
     log(error.message);
@@ -285,6 +293,14 @@ $("disconnect").addEventListener("click", async () => {
     $("deviceInfo").textContent = "No instrument selected";
     update();
   }
+});
+
+$('forceDisconnect').addEventListener('click',async()=>{
+  if(!state.closing||state.forceClosing)return;
+  state.forceClosing=true;update();
+  notify('Force closing USB. The pending response may be incomplete.');
+  try {await state.driver?.disconnect(new Error('User forced USB disconnect.'));}
+  catch(error){log('Forced close failed: '+error.message);}
 });
 
 async function prepare(config) {
