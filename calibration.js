@@ -47,7 +47,7 @@ export function validateCalibration(profile) {
   if(!profile || profile.kind!=='single-line-offset' || profile.version!==1)throw new Error('Unsupported calibration profile.');
   const string=(v,max)=>typeof v==='string'&&v.trim().length>0&&v.length<=max;
   if(!string(profile.id,100)||!string(profile.name,120)||!string(profile.serial,200)||
-      !['hardware','simulated'].includes(profile.source)||!['usb4000','obp','demo'].includes(profile.deviceProfile)||
+      !['hardware','simulated'].includes(profile.source)||!['usb4000','jaz','obp','demo'].includes(profile.deviceProfile)||
       ((profile.source==='simulated')!==(profile.deviceProfile==='demo'))||
       !/^[a-f0-9]{64}$/.test(profile.factorySignature)||
       !Number.isInteger(profile.pixelCount)||profile.pixelCount<3||profile.pixelCount>32768||

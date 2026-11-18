@@ -68,3 +68,16 @@ test('OceanView raw-zero window and historical cropped-window metadata both roun
     assert.equal(decoded.detector.activeStart,activeStart);
   }
 });
+
+test('Jaz datasets preserve channel, 2048 samples and electric-dark metadata in JSON and CSV',()=>{
+  const frame={captureId:'jaz-frame',label:'Jaz sample',timestamp:new Date().toISOString(),source:'hardware',
+    serial:'JAZ-1',profile:'jaz',channel:1,mode:'device-counts',integration:100000,
+    intensities:new Uint16Array(2048).fill(500),wavelengths:Float64Array.from({length:2048},(_,i)=>350+.2*i),
+    detector:{activeStart:0,rawPixelCount:2048,autoscaleLevel:60000,opticalDarkMean:15}};
+  const dataset={name:'Jaz',notes:'',createdAt:new Date().toISOString()};
+  const restored=decodeBackup(encodeBackup(dataset,[frame])).frames[0];
+  assert.equal(restored.channel,1);assert.equal(restored.profile,'jaz');assert.deepEqual(restored.detector,frame.detector);
+  assert.equal(restored.intensities.length,2048);assert.ok(datasetCSV(dataset,[restored]).split('\r\n')[0].endsWith('jaz_channel'));
+  assert.throws(()=>normalizeFrame({...frame,channel:undefined}),/channel/);
+  assert.throws(()=>normalizeFrame({...frame,detector:{...frame.detector,rawPixelCount:3840}}),/metadata/);
+});

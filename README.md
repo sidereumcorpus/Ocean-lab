@@ -2,7 +2,7 @@
 
 A dependency-free, browser-based Ocean Optics / Ocean Insight spectrometer dashboard.
 Academic dark mode, native canvas spectrum plot, single and continuous acquisition,
-indexed wavelength calibration, and CSV export. USB4000 legacy USB and the existing OBP profile are supported. Demo data is always labeled simulated.
+indexed wavelength calibration, and CSV export. USB4000 and Jaz legacy USB plus the existing OBP profile are supported. Demo data is always labeled simulated.
 
 ## Publish on GitHub Pages
 
@@ -281,3 +281,43 @@ signatures prevent those profiles from being applied to the corrected axis.
 
 Version 1.5.2 supersedes the 1.5.1 shifted-window convention: both sample p and
 factory wavelength P(p) now use original raw pixel p, matching OceanView.
+
+## Jaz USB support (1.6.0)
+
+Leave the profile on **Auto** and select the Jaz (`2457:2000`). Factory
+wavelengths load automatically and electric-dark subtraction stays on. Windows
+requires WinUSB bound to the Jaz, just as for USB4000. Help now lists both IDs.
+
+For a multi-spectrometer Jaz stack, choose **Device settings → Jaz channel**
+before connecting (zero-based, default 0). The driver queries spectrometer count
+with C0, rejects empty stacks/out-of-range channels, and selects C1/channel before
+reading module serial/calibration. One channel per connection is supported;
+disconnect to change it. The count is not a count of unrelated lamp/battery
+modules. Module serial and channel are retained in saved data; calibration grid
+signatures and dark/reference state distinguish channels. No simultaneous
+multi-channel acquisition or Ethernet support is implemented.
+
+Jaz uses legacy EP1 OUT commands and EP1 IN EEPROM replies. Spectrum command 09
+reads exactly **4096 bytes / 2048 uint16 LE pixels on EP2**, at both high and full
+speed. There is **no sync byte**, no USB4000 split onto EP6, no USB4000 FE status
+query and no OBP framing. Wavelengths use EEPROM slots 1–4 at original pixel
+indices 0–2047. Slot 17 reply offsets 6–7 supply saturation scaling; zero uses
+unity gain. Optical black uses raw indices 2–23, matching SeaBreeze JAZ.
+Jaz ASCII replies terminate at the first null; later garbage is ignored.
+
+Integration changes are cached by Jaz's processor and take effect at the next
+spectrum request; no ACK or undocumented status read is expected. A known
+100000 µs exposure is established on connection. The OEM clock has four
+significant digits and at best 10 µs resolution. Ocean Lab rejects values that
+cannot be represented: 10 µs steps below 100000; 100 µs below 1000000; 1000 µs
+below 10000000; and 10000 µs thereafter. The supported representable range is
+1000–65530000 µs. No lamp, strobe, EEPROM or firmware writes are performed.
+
+Factory loading, capture/live, datasets, CSV/JSON backup, dark/reference views
+and wavelength alignment are integrated. Stored intensity arrays remain scaled
+counts; electric-dark/absorbance/transmittance views remain session processing.
+Jaz support is verified using mocked USB transports; compare the selected module
+against OceanView before relying on physical measurements.
+
+Sources: [Jaz OEM data sheet 013-RD000-000-05-201109, USB pp.14–23](https://www.rktech.hu/dokumentaciok/OceanOptics/Spectrometers/Jaz%20OEM%20Data%20Sheet.pdf)
+and [SeaBreeze JAZ configuration](https://python-seabreeze.readthedocs.io/en/latest/_modules/seabreeze/pyseabreeze/devices.html).

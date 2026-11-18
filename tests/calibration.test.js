@@ -73,3 +73,13 @@ test('identical wavelength grids with different readout conventions cannot reuse
   assert.notEqual(corrected,old);
   assert.equal(corrected,await gridSignature(grid,'usb4000:oceanview:raw0:3648:v1'));
 });
+
+test('Jaz calibration profiles retain model identity and require channel-specific grid signature',async()=>{
+  const signature=await gridSignature(grid,'jaz:raw0:2048:channel0:v1');
+  const other=await gridSignature(grid,'jaz:raw0:2048:channel1:v1');
+  const jazContext={...context,deviceProfile:'jaz',factorySignature:signature};
+  const profile={...p,...jazContext};
+  assert.equal(validateCalibration(profile).deviceProfile,'jaz');
+  assert.equal(matchesCalibration(profile,jazContext),true);
+  assert.equal(matchesCalibration(profile,{...jazContext,factorySignature:other}),false);
+});

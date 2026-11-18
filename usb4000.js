@@ -1,4 +1,4 @@
-import { OceanOBPSpectrometer } from './ocean-obp.js?v=pixels-3';
+import { OceanOBPSpectrometer } from './ocean-obp.js?v=jaz-1';
 
 /**
  * USB4000 legacy USB driver (VID 2457, PID 1022).
@@ -14,6 +14,9 @@ export class USB4000Spectrometer extends OceanOBPSpectrometer {
   constructor(options = {}) {
     super(options);
     this.profile = 'usb4000';
+    this.modelName = 'USB4000';
+    this.productId = 0x1022;
+    this.readoutPixels = 3648;
     this.pixelCount = 3648; // OceanView-compatible first 3648 wire samples.
     this.lastRawSpectrum = null;
     this.opticalDarkPixels = null;
@@ -42,8 +45,8 @@ export class USB4000Spectrometer extends OceanOBPSpectrometer {
     let device, claimed = null;
     try {
       device = selectedDevice || await this._usb.requestDevice({ filters: [{ vendorId: 0x2457 }] });
-      if (device.vendorId !== 0x2457 || device.productId !== 0x1022) {
-        throw new Error('The USB4000 profile requires VID 2457 / PID 1022.');
+      if (device.vendorId !== 0x2457 || device.productId !== this.productId) {
+        throw new Error('The '+this.modelName+' profile requires VID 2457 / PID '+this.productId.toString(16)+'.');
       }
       check();
       await device.open();
@@ -54,7 +57,7 @@ export class USB4000Spectrometer extends OceanOBPSpectrometer {
         await device.selectConfiguration(configuration.configurationValue);
       }
       check();
-      // USB4000 roles are model-defined. Do not guess among its three IN
+      // Legacy endpoint roles are model-defined. Do not guess among bulk IN
       // endpoints using the generic OBP endpoint override fields.
       const candidates = [];
       for (const iface of device.configuration.interfaces) {
@@ -73,7 +76,7 @@ export class USB4000Spectrometer extends OceanOBPSpectrometer {
       candidates.sort((a,b) => a.iface.interfaceNumber - b.iface.interfaceNumber ||
         a.alt.alternateSetting - b.alt.alternateSetting);
       const chosen = candidates[0];
-      if (!chosen) throw new Error('USB4000 command and spectrum endpoints are unavailable. Check WinUSB binding.');
+      if (!chosen) throw new Error(this.modelName+' command and spectrum endpoints are unavailable. Check WinUSB binding.');
       await device.claimInterface(chosen.iface.interfaceNumber);
       claimed = chosen.iface.interfaceNumber;
       check();
@@ -87,24 +90,9 @@ export class USB4000Spectrometer extends OceanOBPSpectrometer {
       this._usb.addEventListener('disconnect', this._removed);
       this._endpoints = new Map(chosen.alt.endpoints.filter(ep =>
         ep.type === 'bulk' && ep.direction === 'in').map(ep => [ep.endpointNumber,ep.packetSize]));
-      await this._transaction(async session => {
-        await this._write(session, Uint8Array.of(0x01)); // Initialize.
-        await this._write(session, Uint8Array.of(0x0a,0,0)); // Normal trigger mode.
-        const status = await this._status(session);
-        this.highSpeed = status[14] === 0x80;
-        if (![0,0x80].includes(status[14])) throw new Error('Unknown USB4000 USB speed status.');
-        if (this.highSpeed && !chosen.find('in',6)) {
-          throw new Error('High-speed USB4000 requires bulk IN endpoint 6.');
-        }
-        this.integrationTime = new DataView(status.buffer, status.byteOffset).getUint32(2,true);
-        this.serialNumber = await this._readSlot(session,0);
-        const saturation = await this._readSlotBytes(session,17);
-        // SeaBreeze USB4000 layout: full reply bytes 6..7, data bytes 4..5.
-        const level = new DataView(saturation.buffer,saturation.byteOffset).getUint16(6,true);
-        this.autoscaleLevel = level || null; // Unprogrammed zero means unity gain.
-      });
+      await this._transaction(session => this._initializeDevice(session,chosen));
       check();
-      this.pixelCount = 3648;
+      this.pixelCount = this.readoutPixels;
       return this;
     } catch (error) {
       if (this.device === device) this._invalidate();
@@ -118,6 +106,23 @@ export class USB4000Spectrometer extends OceanOBPSpectrometer {
     } finally {
       this._connecting = false;
     }
+  }
+
+  async _initializeDevice(session,chosen) {
+    await this._write(session, Uint8Array.of(0x01)); // Initialize.
+    await this._write(session, Uint8Array.of(0x0a,0,0)); // Normal trigger mode.
+    const status = await this._status(session);
+    this.highSpeed = status[14] === 0x80;
+    if (![0,0x80].includes(status[14])) throw new Error('Unknown USB4000 USB speed status.');
+    if (this.highSpeed && !chosen.find('in',6)) {
+      throw new Error('High-speed USB4000 requires bulk IN endpoint 6.');
+    }
+    this.integrationTime = new DataView(status.buffer, status.byteOffset).getUint32(2,true);
+    this.serialNumber = await this._readSlot(session,0);
+    const saturation = await this._readSlotBytes(session,17);
+    // SeaBreeze USB4000 layout: full reply bytes 6..7, data bytes 4..5.
+    const level = new DataView(saturation.buffer,saturation.byteOffset).getUint16(6,true);
+    this.autoscaleLevel = level || null; // Unprogrammed zero means unity gain.
   }
 
   _invalidate(reason) {
@@ -137,13 +142,13 @@ export class USB4000Spectrometer extends OceanOBPSpectrometer {
     const result = await device.transferOut(1, bytes);
     this._checkSession(device,generation);
     if (result.status !== 'ok' || result.bytesWritten !== bytes.length) {
-      throw new Error('USB4000 command transfer failed: ' + result.status);
+      throw new Error(this.modelName + ' command transfer failed: ' + result.status);
     }
   }
 
   _checkSession(device,generation=this._generation) {
     if (device?.sessionDevice) { generation=device.generation;device=device.sessionDevice; }
-    if (generation!==this._generation || !device || this.device !== device || !device.opened) throw new Error('USB4000 session closed.');
+    if (generation!==this._generation || !device || this.device !== device || !device.opened) throw new Error(this.modelName + ' session closed.');
   }
 
   /** Preserve any bytes after the requested logical unit, e.g. the sync byte. */
@@ -152,18 +157,18 @@ export class USB4000Spectrometer extends OceanOBPSpectrometer {
     this._checkSession(device,generation);
     let buffer = this._buffers.get(endpoint) || new Uint8Array(0);
     const packetSize = this._endpoints.get(endpoint);
-    if (!packetSize) throw new Error('Missing USB4000 endpoint ' + endpoint);
+    if (!packetSize) throw new Error('Missing '+this.modelName+' endpoint ' + endpoint);
     while (buffer.length < count) {
       const needed = count - buffer.length;
       const length = Math.ceil(needed / packetSize) * packetSize;
       const result = await device.transferIn(endpoint, length);
       this._checkSession(device,generation);
       if (result.status !== 'ok' || !result.data) {
-        throw new Error('USB4000 IN endpoint ' + endpoint + ' failed: ' + result.status);
+        throw new Error(this.modelName + ' IN endpoint ' + endpoint + ' failed: ' + result.status);
       }
       const bytes = new Uint8Array(result.data.buffer, result.data.byteOffset, result.data.byteLength);
-      if (!bytes.length) throw new Error('USB4000 returned an empty/truncated response. Reconnect the device.');
-      if (buffer.length + bytes.length > 8192) throw new Error('USB4000 response exceeds buffer limit.');
+      if (!bytes.length) throw new Error(this.modelName + ' returned an empty/truncated response. Reconnect the device.');
+      if (buffer.length + bytes.length > 8192) throw new Error(this.modelName + ' response exceeds buffer limit.');
       const combined = new Uint8Array(buffer.length + bytes.length);
       combined.set(buffer); combined.set(bytes,buffer.length); buffer = combined;
     }
@@ -188,14 +193,14 @@ export class USB4000Spectrometer extends OceanOBPSpectrometer {
     // A 64-byte capacity accommodates the whole EP1 short packet, including
     // firmware revisions returning 18 rather than 17 bytes. Never issue a
     // second read to fill a missing byte: that could consume another response.
-    const result = await device.transferIn(1,64);
+    const result = await device.transferIn(1,this._endpoints.get(1) || 64);
     this._checkSession(device,generation);
     if (result.status !== 'ok' || !result.data || ![17,18].includes(result.data.byteLength)) {
-      throw new Error('Invalid USB4000 EEPROM reply length/status.');
+      throw new Error('Invalid '+this.modelName+' EEPROM reply length/status.');
     }
     const bytes = new Uint8Array(result.data.buffer,result.data.byteOffset,result.data.byteLength).slice();
     if (bytes[0] !== 0x05 || bytes[1] !== index) {
-      throw new Error('USB4000 EEPROM response does not match slot ' + index);
+      throw new Error(this.modelName + ' EEPROM response does not match slot ' + index);
     }
     return bytes;
   }
@@ -208,7 +213,7 @@ export class USB4000Spectrometer extends OceanOBPSpectrometer {
   async _readNumber(device,slot) {
     const text = await this._readSlot(device,slot);
     if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?$/.test(text) || !Number.isFinite(Number(text))) {
-      throw new Error('Invalid USB4000 coefficient in EEPROM slot ' + slot);
+      throw new Error('Invalid '+this.modelName+' coefficient in EEPROM slot ' + slot);
     }
     return Number(text);
   }
@@ -295,12 +300,12 @@ export class USB4000Spectrometer extends OceanOBPSpectrometer {
         const coefficients = [];
         for (let slot = 1; slot <= 4; slot++) coefficients.push(await this._readNumber(device,slot));
         if (coefficients.slice(1).every(value => value === 0)) {
-          throw new Error('USB4000 wavelength calibration is constant/invalid.');
+          throw new Error(this.modelName+' wavelength calibration is constant/invalid.');
         }
         this._coefficients = coefficients;
       }
       // Match OceanView: returned sample p is raw pixel p, wavelength P(p).
-      const wavelengths = new Float64Array(3648);
+      const wavelengths = new Float64Array(this.readoutPixels);
       for (let p = 0; p < wavelengths.length; p++) {
         const c = this._coefficients;
         const rawPixel = p;
@@ -319,7 +324,7 @@ export class USB4000Spectrometer extends OceanOBPSpectrometer {
     const timeoutMs = Math.max(this.options.timeoutMs,
       this.integrationTime === null ? 0 : this.integrationTime/1000+5000);
     const timeout = new Promise((_,reject) => {
-      timer = setTimeout(() => reject(new Error('USB4000 transaction timed out. Reconnect to continue.')),timeoutMs);
+      timer = setTimeout(() => reject(new Error(this.modelName+' transaction timed out. Reconnect to continue.')),timeoutMs);
     });
     // Pass the captured session into every transfer to prevent late work from
     // crossing a disconnect/reconnect boundary. Never retry legacy commands.

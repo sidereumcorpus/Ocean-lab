@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { USB4000Spectrometer } from '../usb4000.js?v=pixels-3';
-import { OceanOBPSpectrometer } from '../ocean-obp.js?v=pixels-3';
+import { USB4000Spectrometer } from '../usb4000.js?v=jaz-1';
+import { OceanOBPSpectrometer } from '../ocean-obp.js?v=jaz-1';
 import { createSpectrometerForDevice, selectSpectrometer } from '../spectrometer.js';
 
 const view = bytes => new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);

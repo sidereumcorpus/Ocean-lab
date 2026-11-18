@@ -4,15 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#111820">
-<meta name="description" content="Browser-based Ocean Optics USB4000 and OBP spectrometer dashboard.">
+<meta name="description" content="Browser-based Ocean Optics USB4000, Jaz and OBP spectrometer dashboard.">
 <title>Ocean Lab · Spectrometer</title>
-<link rel="stylesheet" href="./style.css?v=pixels-3">
-<script type="module" src="./app.js?v=pixels-3"></script>
+<link rel="stylesheet" href="./style.css?v=jaz-1">
+<script type="module" src="./app.js?v=jaz-1"></script>
 </head>
 <body><main class="app-shell">
 <header class="app-header"><div class="brand"><div class="eyebrow">OCEAN LAB</div><h1>Spectrometer</h1></div><div class="device-identity"><div id="status" class="status" role="status">Disconnected</div><div id="deviceInfo" class="muted">No instrument selected</div></div>
 <div class="header-actions"><button id="connect" class="primary">Connect USB</button><button id="demo">Try demo</button><button id="disconnect" class="danger" disabled>Disconnect</button><button id="openSettings" aria-haspopup="dialog">Device settings</button><button id="deviceHelp" class="text-button" aria-haspopup="dialog">Device not found?</button></div></header>
-<div id="notice" role="status" aria-live="polite">Connect a USB4000 or OBP spectrometer, or try demo mode.</div>
+<div id="notice" role="status" aria-live="polite">Connect a USB4000, Jaz or OBP spectrometer, or try demo mode.</div>
 <div class="workspace"><section class="panel spectrum-panel" aria-label="Spectrum workspace">
 <div class="plot-head"><div><div class="eyebrow">SPECTRAL RESPONSE</div><h2>Intensity distribution</h2></div><div id="legend" class="legend">Awaiting acquisition</div></div>
 <div class="canvas-wrap"><canvas id="plot" role="img" aria-label="Spectrum intensity plot"></canvas>
@@ -30,12 +30,12 @@
 <button id="tab-activity" role="tab" aria-selected="false" aria-controls="pane-activity" data-tab-group="workspace" data-tab="activity" tabindex="-1">Activity</button>
 </div><section id="pane-acquire" class="tab-pane" role="tabpanel" aria-labelledby="tab-acquire" data-tab-panel="workspace" tabindex="0">
 <div class="pane-title"><div class="eyebrow">MEASUREMENT</div><h2>Acquisition</h2></div>
-<p id="acquisitionDefaults" class="note" role="status">Factory wavelengths load automatically. USB4000 electric dark correction is always on.</p>
+<p id="acquisitionDefaults" class="note" role="status">Factory wavelengths load automatically. USB4000/Jaz electric dark correction is always on.</p>
 <div class="grid2"><div><label for="integration">Integration time · µs</label><input id="integration" type="number" min="1" max="4294967295" step="1" value="100000"></div>
 <div><label for="mode">Spectrum</label><select id="mode"><option value="corrected">Corrected</option><option value="raw">Raw ADC</option></select></div></div>
 <details><summary>Dark, reference & spectroscopy</summary>
 <label for="displayMode">Plot view</label><select id="displayMode"><option value="counts">Intensity counts</option><option value="transmittance">Transmittance · %</option><option value="absorbance">Absorbance · AU</option></select>
-<label class="check"><input id="opticalDark" type="checkbox" checked disabled> Electric dark correction · always on for USB4000</label>
+<label class="check"><input id="opticalDark" type="checkbox" checked disabled> Electric dark correction · always on for USB4000/Jaz</label>
 <div class="buttons"><button id="captureDark" disabled>Capture dark</button><button id="captureWhite" disabled>Capture light reference</button></div>
 <p id="spectroscopyStatus" class="note" role="status">Capture dark with the light blocked, then a light reference without the sample.</p>
 <p class="note">Derived views are session-only. Save and CSV retain saturation-scaled intensity counts and optical-black metadata. Invalid ratios appear as gaps. Changing integration time or spectrum mode clears dark/reference.</p>
@@ -81,8 +81,9 @@
 </section><section id="pane-activity" class="tab-pane" role="tabpanel" aria-labelledby="tab-activity" data-tab-panel="workspace" tabindex="0" hidden><div class="plot-head"><h2>Session activity</h2><button id="clearLog">Clear</button></div><pre id="log" aria-live="off">Ready.</pre></section>
 </aside></div><footer>Local acquisition & storage · Export JSON backups for important measurements</footer></main>
 <dialog id="settingsDialog" aria-labelledby="settingsTitle"><div class="plot-head"><h2 id="settingsTitle">Device settings</h2><button id="closeSettings" aria-label="Close device settings">Close</button></div>
-<p class="note">Auto detects USB4000. OBP overrides apply only to OBP instruments. Endpoint fields can stay blank for USB4000.</p><fieldset id="settings">
-<label for="profile">Instrument profile</label><select id="profile"><option value="auto">Auto · USB4000 / OBP</option><option value="usb4000">USB4000 · legacy USB</option><option value="obp">OBP · STS uint16 profile</option></select>
+<p class="note">Auto detects USB4000 and Jaz. OBP overrides apply only to OBP instruments. Endpoint fields can stay blank for USB4000 and Jaz.</p><fieldset id="settings">
+<label for="profile">Instrument profile</label><select id="profile"><option value="auto">Auto · USB4000 / Jaz / OBP</option><option value="usb4000">USB4000 · legacy USB</option><option value="jaz">Jaz · legacy USB</option><option value="obp">OBP · STS uint16 profile</option></select>
+<label for="jazChannel">Jaz channel · zero-based, reconnect to change</label><input id="jazChannel" type="number" min="0" max="14" step="1" value="0"><p class="note">Jaz defaults to channel 0. Other models ignore this field. Only one Jaz channel is acquired per connection.</p>
 <label for="protocol">OBP protocol version · hexadecimal</label><input id="protocol" value="1100" spellcheck="false">
 <div class="grid2">
 <div><label for="iface">Interface · optional</label><input id="iface" type="number" min="0" max="255" placeholder="Auto"></div>
@@ -96,14 +97,14 @@
 </fieldset></dialog>
 <dialog id="helpDialog" aria-labelledby="helpTitle">
 <div class="plot-head"><h2 id="helpTitle">Device not found?</h2><button id="closeHelp" aria-label="Close device help">Close</button></div>
-<p>For your <strong>Ocean Optics USB4000</strong>, Windows must use WinUSB to connect through this app.</p>
-<ol><li>Connect the USB4000 directly to your computer and close OceanView, SpectraSuite, and other tabs using it.</li>
-<li>Open Windows Device Manager → USB4000 → Properties → Details → Hardware Ids. Confirm <strong>VID_2457 & PID_1022</strong>.</li>
+<p>For an <strong>Ocean Optics USB4000 or Jaz</strong>, Windows must use WinUSB to connect through this app.</p>
+<ol><li>Connect the spectrometer directly to your computer and close OceanView, SpectraSuite, and other tabs using it.</li>
+<li>Open Windows Device Manager → spectrometer → Properties → Details → Hardware Ids. Confirm <strong>VID_2457 and PID_1022 (USB4000) or PID_2000 (Jaz)</strong>.</li>
 <li>Download <a href="https://zadig.akeo.ie/" target="_blank" rel="noopener noreferrer">Zadig from its official website</a> and run it as administrator.</li>
-<li>Select <strong>Options → List All Devices</strong>, choose <strong>Ocean Optics USB4000</strong>, and verify USB ID <strong>2457 1022</strong>.</li>
-<li>Choose <strong>WinUSB</strong> as the target driver, then <strong>Install Driver</strong> or <strong>Replace Driver</strong>. Change only the USB4000's driver.</li>
+<li>Select <strong>Options → List All Devices</strong>, choose your <strong>Ocean Optics spectrometer</strong>, and verify USB ID <strong>2457 1022</strong> (USB4000) or <strong>2457 2000</strong> (Jaz).</li>
+<li>Choose <strong>WinUSB</strong> as the target driver, then <strong>Install Driver</strong> or <strong>Replace Driver</strong>. Change only the selected spectrometer's driver.</li>
 <li>Unplug and reconnect it. Open this page in Chrome or Edge, leave the profile on <strong>Auto</strong>, then click <strong>Connect USB</strong>.</li></ol>
 <p class="note">Changing this driver can affect Ocean Optics desktop software on this computer. It does not change the instrument or another computer.</p>
-<details><summary>Still having trouble?</summary><ul><li>Use the HTTPS page, not a downloaded file opened with file://.</li><li>Try another USB cable or port. Check Device Manager for an error code.</li><li>If claiming the interface fails, close other software using the device, reconnect, and try again.</li><li>WinUSB and the USB4000 legacy profile are both required. OBP command fields cannot configure a USB4000.</li></ul></details>
+<details><summary>Still having trouble?</summary><ul><li>Use the HTTPS page, not a downloaded file opened with file://.</li><li>Try another USB cable or port. Check Device Manager for an error code.</li><li>If claiming the interface fails, close other software using the device, reconnect, and try again.</li><li>WinUSB and the matching legacy profile are required for USB4000/Jaz. OBP fields cannot configure these instruments.</li></ul></details>
 </dialog>
 </body></html>

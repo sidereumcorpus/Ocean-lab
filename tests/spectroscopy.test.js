@@ -45,3 +45,11 @@ test('automatic optical black policy is identical for dark, light reference and 
   const sample=frame({intensities:[60,60],detector:{opticalDarkMean:10}});
   assert.deepEqual([...session.process(sample,'transmittance')],[50,50]);
 });
+
+test('Jaz optical dark is automatic and references never cross channels',()=>{
+  const f=frame({profile:'jaz',channel:0,intensities:[10,20],detector:{opticalDarkMean:5}});
+  assert.deepEqual([...signalCounts(f)],[5,15]);
+  const session=new SpectroscopySession();session.capture('dark',f);
+  session.capture('reference',{...f,intensities:[100,200]});
+  assert.throws(()=>session.process({...f,channel:1},'transmittance'),/matching/);
+});

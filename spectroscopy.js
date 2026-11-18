@@ -20,7 +20,7 @@ export function spectroscopy(sample, dark, reference, mode = 'transmittance') {
 // Older archived captures may have no black-pixel metadata; keep their
 // original counts readable rather than inventing a correction baseline.
 export function usesOpticalDark(frame) {
-  return frame.profile === 'usb4000' && frame.detector != null;
+  return ['usb4000','jaz'].includes(frame.profile) && frame.detector != null;
 }
 
 export function signalCounts(frame, subtractOpticalDark = usesOpticalDark(frame)) {
@@ -35,7 +35,7 @@ export class SpectroscopySession {
   clear() { this.dark=null;this.reference=null; }
   key(frame,optical) {
     return JSON.stringify([frame.source,frame.serial,frame.profile,frame.mode,
-      frame.integration,frame.intensities.length,Boolean(optical)]);
+      frame.integration,frame.intensities.length,Boolean(optical),frame.channel??null]);
   }
   capture(kind,frame,optical=usesOpticalDark(frame)) {
     if (!['dark','reference'].includes(kind)) throw new Error('Invalid reference kind.');

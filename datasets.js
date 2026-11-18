@@ -1,4 +1,4 @@
-import { validateCalibration } from './calibration.js?v=pixels-3';
+import { validateCalibration } from './calibration.js?v=jaz-1';
 /** Local, dependency-free dataset storage and portable file formats. */
 export const MAX_FRAMES = 2000;
 const MAX_PIXELS = 32768;
@@ -34,7 +34,7 @@ export function normalizeFrame(frame) {
   }
   if (!['hardware','simulated'].includes(frame.source)) throw new Error('Invalid data source.');
   if (!['raw','corrected','device-counts'].includes(frame.mode)) throw new Error('Invalid spectrum type.');
-  if (!['demo','obp','usb4000'].includes(frame.profile)) throw new Error('Invalid instrument profile.');
+  if (!['demo','obp','usb4000','jaz'].includes(frame.profile)) throw new Error('Invalid instrument profile.');
   if ((frame.source === 'simulated') !== (frame.profile === 'demo')) {
     throw new Error('Simulated data must retain its demo profile.');
   }
@@ -46,14 +46,20 @@ export function normalizeFrame(frame) {
     integration: frame.integration, mode:frame.mode, profile:frame.profile,
     source:frame.source, serial:text(frame.serial || '',200,'serial'), timestamp:date(frame.timestamp)
   };
+  if(frame.profile==='jaz') {
+    if(!Number.isInteger(frame.channel)||frame.channel<0||frame.channel>14)throw new Error('Invalid Jaz channel provenance.');
+    normalized.channel=frame.channel;
+  }
   if(frame.detector!==undefined) {
     const d=frame.detector;
-    if(frame.profile!=='usb4000'||values.length!==3648||!d||![0,21].includes(d.activeStart)||d.rawPixelCount!==3840||
+    const geometry=d && (frame.profile==='usb4000'&&values.length===3648&&[0,21].includes(d.activeStart)&&d.rawPixelCount===3840
+      ||frame.profile==='jaz'&&values.length===2048&&d.activeStart===0&&d.rawPixelCount===2048);
+    if(!geometry||
       !(d.autoscaleLevel===null||Number.isInteger(d.autoscaleLevel)&&d.autoscaleLevel>0&&d.autoscaleLevel<=65535)||
       !Number.isFinite(d.opticalDarkMean)||d.opticalDarkMean<0||d.opticalDarkMean>65535*65535) {
-      throw new Error('Invalid USB4000 detector processing metadata.');
+      throw new Error('Invalid legacy detector processing metadata.');
     }
-    normalized.detector={activeStart:d.activeStart,rawPixelCount:3840,autoscaleLevel:d.autoscaleLevel,opticalDarkMean:d.opticalDarkMean};
+    normalized.detector={activeStart:d.activeStart,rawPixelCount:d.rawPixelCount,autoscaleLevel:d.autoscaleLevel,opticalDarkMean:d.opticalDarkMean};
   }
   if(frame.calibration !== undefined) normalized.calibration=frame.calibration===null?null:validateCalibration(frame.calibration);
   if(normalized.calibration) {
@@ -98,7 +104,7 @@ function csvCell(value) {
 }
 /** Long-form CSV: rows remain valid when captures have different pixel grids. */
 export function datasetCSV(dataset, frames) {
-  const rows=['dataset,capture_id,sample_label,timestamp_utc,source,profile,serial,spectrum_type,integration_us,pixel,wavelength_nm,intensity_counts,calibration_kind,calibration_id,calibration_name,offset_nm,reference_nm,reference_peak_pixel,factory_wavelength_nm,raw_active_start,autoscale_level,optical_dark_mean_counts'];
+  const rows=['dataset,capture_id,sample_label,timestamp_utc,source,profile,serial,spectrum_type,integration_us,pixel,wavelength_nm,intensity_counts,calibration_kind,calibration_id,calibration_name,offset_nm,reference_nm,reference_peak_pixel,factory_wavelength_nm,raw_active_start,autoscale_level,optical_dark_mean_counts,jaz_channel'];
   for(const frame of frames) {
     const f=normalizeFrame(frame);
     for(let p=0;p<f.intensities.length;p++) rows.push([
@@ -107,7 +113,7 @@ export function datasetCSV(dataset, frames) {
       f.calibration?.kind||(f.wavelengths?'factory':'none'),f.calibration?.id||'',f.calibration?.name||'',
       f.calibration?.offsetNm??'',f.calibration?.referenceNm??'',f.calibration?.peakPixel??'',
       f.factoryWavelengths?f.factoryWavelengths[p]:f.wavelengths?f.wavelengths[p]:'',
-      f.detector?.activeStart??'',f.detector?.autoscaleLevel??'',f.detector?.opticalDarkMean??''
+      f.detector?.activeStart??'',f.detector?.autoscaleLevel??'',f.detector?.opticalDarkMean??'',f.channel??''
     ].map(csvCell).join(','));
   }
   return rows.join('\r\n');

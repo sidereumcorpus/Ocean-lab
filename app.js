@@ -1,10 +1,10 @@
-import { SpectroscopySession, signalCounts, usesOpticalDark } from './spectroscopy.js?v=pixels-3';
+import { SpectroscopySession, signalCounts, usesOpticalDark } from './spectroscopy.js?v=jaz-1';
 import { initializeWorkspace } from "./ui.js";
-import { selectSpectrometer } from "./spectrometer.js?v=pixels-3";
-import { DatasetPanel, downloadFile } from "./dataset-ui.js?v=pixels-3";
-import { datasetCSV } from "./datasets.js?v=pixels-3";
-import { gridSignature, alignGrid } from "./calibration.js?v=pixels-3";
-import { CalibrationPanel } from "./calibration-ui.js?v=pixels-3";
+import { selectSpectrometer } from "./spectrometer.js?v=jaz-1";
+import { DatasetPanel, downloadFile } from "./dataset-ui.js?v=jaz-1";
+import { datasetCSV } from "./datasets.js?v=jaz-1";
+import { gridSignature, alignGrid } from "./calibration.js?v=jaz-1";
+import { CalibrationPanel } from "./calibration-ui.js?v=jaz-1";
 
 const $ = id => document.getElementById(id);
 const state = {
@@ -52,16 +52,19 @@ function update() {
   const connected = active();
   $("deviceInfo").title = $("deviceInfo").textContent;
   const dataBusy = Boolean(collections?.busy);
-  const legacy = connected && !state.demo && state.driver.profile === 'usb4000';
+  const legacy = connected && !state.demo && ['usb4000','jaz'].includes(state.driver.profile);
+  const jaz=legacy && state.driver.profile==='jaz';
   const corrected = document.querySelector('#mode option[value="corrected"]');
   const raw = document.querySelector('#mode option[value="raw"]');
   corrected.disabled = legacy;
-  raw.textContent = legacy ? 'Device counts (USB4000)' : 'Raw ADC';
+  raw.textContent = legacy ? 'Device counts ('+state.driver.modelName+')' : 'Raw ADC';
   if (legacy) $('mode').value = 'raw';
-  $('integration').min = legacy ? '3800' : '1';
-  $('integration').max = legacy ? '65535000' : '4294967295';
-  $('integration').step = legacy ? '10' : '1';
-  $('deviceNote').textContent = legacy
+  $('integration').min = legacy ? String(state.driver.minIntegrationTime) : '1';
+  $('integration').max = legacy ? String(state.driver.maxIntegrationTime) : '4294967295';
+  $('integration').step = jaz ? String(state.driver.integrationStep(Number($('integration').value))) : legacy ? '10' : '1';
+  $('deviceNote').textContent = jaz
+    ? 'Jaz: 2048 pixels, channel '+state.driver.channel+' of '+state.driver.channelCount+' modules (zero-based). Factory scaling and electric dark correction are on. Exposure uses 4 significant digits, at best 10 µs resolution.'
+    : legacy
     ? 'USB4000: 3840 wire samples → OceanView-compatible pixels 0–3647. Counts use factory saturation scaling. Electric dark correction is always on. Normal mode: 3800–65535000 µs, 10 µs increments.'
     : 'Wavelengths assume a full, unbinned detector readout.';
   $("status").textContent = state.closing ? "Disconnecting…"
@@ -128,6 +131,7 @@ function hexInput(id, max) {
 function driverOptions() {
   return {
     profile: $("profile").value,
+    channel: integerInput("jazChannel",0,14),
     protocolVersion: hexInput("protocol", 0xffff),
     interfaceNumber: integerInput("iface", 0, 255, true),
     alternateSetting: integerInput("alternate", 0, 255, true),
@@ -194,10 +198,10 @@ $("connect").addEventListener("click", () => run(async () => {
   const d = driver.device;
   $("deviceInfo").textContent =
     (d.productName || "Spectrometer") + " · " + (driver.serialNumber || d.serialNumber || "No serial reported") +
-    (driver.profile === "usb4000" ? " · USB4000 legacy · " + (driver.highSpeed ? "high speed" : "full speed") : " · OBP");
+    (['usb4000','jaz'].includes(driver.profile) ? ' · '+driver.modelName+' legacy'+(driver.profile==='jaz'?' · channel '+driver.channel:'')+' · '+(driver.highSpeed?'high speed':'full speed') : ' · OBP');
   log("Connected: " + (d.productName || "OBP spectrometer") + ".");
-  notify(driver.profile === 'usb4000'
-    ? 'USB4000 ready. Factory wavelengths loaded; electric dark correction is always on. Capture to begin.'
+  notify(['usb4000','jaz'].includes(driver.profile)
+    ? driver.modelName+' ready. Factory wavelengths loaded; electric dark correction is always on. Capture to begin.'
     : 'OBP ready. Factory wavelengths loaded. Set integration time and capture a spectrum.');
 }));
 
@@ -278,14 +282,15 @@ async function acquire(config, {reference = false} = {}) {
     ...(alignment?{factoryWavelengths:state.wavelengths.slice()}:{}),
     captureId: crypto.randomUUID(), label:config.label || "",
     intensities,
-    ...(!demo && state.driver.profile==='usb4000'?{detector:{
-      activeStart:0,rawPixelCount:3840,autoscaleLevel:state.driver.autoscaleLevel,
+    ...(!demo && ['usb4000','jaz'].includes(state.driver.profile)?{detector:{
+      activeStart:0,rawPixelCount:state.driver.lastRawSpectrum.length,autoscaleLevel:state.driver.autoscaleLevel,
       opticalDarkMean:Array.from(state.driver.opticalDarkPixels).reduce((a,b)=>a+b,0)/state.driver.opticalDarkPixels.length *
         (state.driver.autoscaleLevel?65535/state.driver.autoscaleLevel:1)
     }}:{}),
+    ...(!demo && state.driver.profile==='jaz'?{channel:state.driver.channel}:{}),
     wavelengths: grid,
     integration: config.integration,
-    mode: !demo && state.driver.profile === 'usb4000' ? 'device-counts'
+    mode: !demo && ['usb4000','jaz'].includes(state.driver.profile) ? 'device-counts'
       : config.raw ? "raw" : "corrected",
     profile: demo ? 'demo' : state.driver.profile || 'obp',
     timestamp: new Date().toISOString(),
@@ -353,7 +358,8 @@ async function loadFactoryWavelengths() {
   const grid=state.demo?Float64Array.from({length:1024},(_,i)=>350+i*450/1023)
     : await state.driver.getWavelengths();
   const signature=await gridSignature(grid, !state.demo && state.driver.profile==='usb4000'
-    ? 'usb4000:oceanview:raw0:3648:v1' : '');
+    ? 'usb4000:oceanview:raw0:3648:v1' : !state.demo && state.driver.profile==='jaz'
+      ? 'jaz:raw0:2048:channel'+state.driver.channel+':v1' : '');
   if(epoch!==state.epoch)return false;
   state.wavelengths=grid;state.factorySignature=signature;
   calibration.setContext(calibrationContext());
@@ -517,7 +523,7 @@ canvas.addEventListener('click',event=>{
   }}
   calibration.pickPixel(pixel,f.captureId);
 });
-for(const id of ['integration','mode']) $(id).addEventListener('input',()=>{resetSpectroscopy();draw();});
+for(const id of ['integration','mode']) $(id).addEventListener('input',()=>{resetSpectroscopy();draw();update();});
 $('displayMode').addEventListener('change',draw);
 for(const [id,kind] of [['captureDark','dark'],['captureWhite','reference']]) {
   $(id).addEventListener('click',()=>run(async()=>{

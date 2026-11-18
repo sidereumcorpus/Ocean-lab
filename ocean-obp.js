@@ -82,8 +82,8 @@ export class OceanOBPSpectrometer {
     try {
       device = selectedDevice || await this._usb.requestDevice({ filters: [{ vendorId: 0x2457 }] });
       if (device.vendorId !== 0x2457) throw new Error("Not an Ocean Optics device.");
-      if (device.productId === 0x1022) {
-        throw new Error("USB4000 requires the legacy driver; select Auto or USB4000.");
+      if ([0x1022,0x2000].includes(device.productId)) {
+        throw new Error("This instrument requires a legacy driver; select Auto or its model profile.");
       }
       check();
       await device.open();
