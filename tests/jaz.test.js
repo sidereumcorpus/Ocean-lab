@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { JazSpectrometer } from '../jaz.js?v=jaz-boot-2';
+import { JazSpectrometer } from '../jaz.js?v=jaz-echo-3';
 import { createSpectrometerForDevice } from '../spectrometer.js';
-import { USB4000Spectrometer } from '../usb4000.js?v=jaz-boot-2';
+import { USB4000Spectrometer } from '../usb4000.js?v=jaz-echo-3';
 
-function mockJaz({highSpeed=true,chunk=Infinity,count=2,counts=null,autoscale=65535,badEcho=false,stall=false}={}) {
+function mockJaz({highSpeed=true,chunk=Infinity,count=2,counts=null,echo=false,echoOnly=false,echoTogether=false,autoscale=65535,badEcho=false,stall=false}={}) {
   const queues=new Map([[1,[]],[2,[]]]),writes=[],reads=[],listeners=new Set();
   let channel=0,rejectRead,countIndex=0;
   const packet=highSpeed?512:64;
@@ -21,7 +21,12 @@ function mockJaz({highSpeed=true,chunk=Infinity,count=2,counts=null,autoscale=65
     async transferOut(ep,bytes){
       assert.equal(ep,1);writes.push([...bytes]);
       switch(bytes[0]) {
-        case 0xc0: queues.get(1).push(Uint8Array.of(counts?counts[Math.min(countIndex++,counts.length-1)]:count));break;
+        case 0xc0: {
+          const value=counts?counts[Math.min(countIndex++,counts.length-1)]:count;
+          if(echoTogether)queues.get(1).push(Uint8Array.of(0xc0,value));
+          else {if(echo||echoOnly)queues.get(1).push(Uint8Array.of(0xc0));if(!echoOnly)queues.get(1).push(Uint8Array.of(value));}
+          break;
+        }
         case 0xc1: channel=bytes[1];assert.ok(channel<count);break;
         case 0x02: assert.equal(bytes.length,5);break; // No ACK or status reply.
         case 0x05: {
@@ -48,6 +53,7 @@ function mockJaz({highSpeed=true,chunk=Infinity,count=2,counts=null,autoscale=65
       reads.push({ep,length});
       if(stall&&ep===2)return new Promise((resolve,reject)=>rejectRead=reject);
       const queue=queues.get(ep),bytes=queue.shift();
+      if(!bytes&&echoOnly&&ep===1)return new Promise((resolve,reject)=>rejectRead=reject);
       if(!bytes)throw new Error('Unexpected extra read on EP'+ep);
       const n=Math.min(bytes.length,length,ep===2?chunk:Infinity);
       if(n<bytes.length)queue.unshift(bytes.slice(n));
@@ -63,7 +69,7 @@ async function setup(t,config={},options={}) {
   const mock=mockJaz(config),nav=Object.getOwnPropertyDescriptor(globalThis,'navigator'),secure=Object.getOwnPropertyDescriptor(globalThis,'isSecureContext');
   Object.defineProperty(globalThis,'navigator',{value:{usb:mock.usb},configurable:true});
   Object.defineProperty(globalThis,'isSecureContext',{value:true,configurable:true});
-  const d=new JazSpectrometer({startupDelayMs:0,timeoutMs:25,jazStartupAttempts:3,jazStartupRetryMs:1,...options});
+  const d=new JazSpectrometer({startupDelayMs:0,timeoutMs:25,jazCountReplyTimeoutMs:5,jazStartupAttempts:3,jazStartupRetryMs:1,...options});
   t.after(async()=>{await d.disconnect();if(mock.device.opened)await mock.device.close();
     if(nav)Object.defineProperty(globalThis,'navigator',nav);else delete globalThis.navigator;
     if(secure)Object.defineProperty(globalThis,'isSecureContext',secure);else delete globalThis.isSecureContext;});
@@ -166,5 +172,24 @@ test('Jaz disconnect during boot delay prevents further USB queries',async t=>{
   let entered;const ready=new Promise(resolve=>entered=resolve);d.onStatus=()=>entered();
   const connection=d.connect(device);const rejected=assert.rejects(connection,/disconnected|session changed|cancelled/);
   await ready;await d.disconnect();await rejected;
+  assert.deepEqual(writes,[[0xc0]]);assert.equal(device.opened,false);
+});
+
+for(const config of [{echo:true},{echoTogether:true}])test('Jaz C0 echo is consumed separately from count '+JSON.stringify(config),async t=>{
+  const {d,device,writes}=await setup(t,config);await d.connect(device);
+  assert.equal(d.channelCount,2);assert.equal(d.serialNumber,'MODULE-0');
+  assert.deepEqual(writes.slice(0,4),[[0xc0],[0xc1,0],[5,0],[5,17]]);
+});
+test('Jaz echo-only reply has a bounded diagnostic failure, closes USB and never selects a channel',async t=>{
+  const {d,device,writes}=await setup(t,{echoOnly:true});
+  await assert.rejects(d.connect(device),/echo 0xc0 but no module-count data/);
+  assert.deepEqual(writes,[[0xc0]]);assert.equal(device.opened,false);
+});
+test('Jaz echoed zero still follows startup retries and echoed invalid counts still fail',async t=>{
+  const {d,device}=await setup(t,{echo:true,counts:[0,0,2]});await d.connect(device);assert.equal(d.channelCount,2);
+});
+test('Jaz repeated command byte is not accepted as a count',async t=>{
+  const {d,device,writes}=await setup(t,{echo:true,count:0xc0});
+  await assert.rejects(d.connect(device),/0xc0 \(192\).*after echo/);
   assert.deepEqual(writes,[[0xc0]]);assert.equal(device.opened,false);
 });

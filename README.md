@@ -337,3 +337,20 @@ wait for the menu, and reconnect. Additional stack modules can require the
 approved Jaz external supply. A zero count is not proof that the module is
 broken, nor does retrying guarantee recovery. See the vendor's troubleshooting
 section: https://www.oceanoptics.com/wp-content/uploads/2024/12/Jaz-Installation-and-Operation-Instructions.pdf
+
+### Jaz C0 response framing (1.6.2)
+
+A field screenshot showed startup returning byte C0 (192) while the Jaz was
+already at its menu. That byte equals the request command; it is not a valid
+module count. The parser now accepts either [count] or [C0, count], including
+an echo and data delivered by separate USB transfers. The latter is a
+compatibility hypothesis supported by the observed prefix, not a confirmed
+complete capture of this unit's firmware response. After C0, the driver waits
+at most 2 seconds for a count; an echo alone fails with an explicit diagnostic,
+closes the session and issues no channel/acquisition commands. Extra bytes,
+repeated echoes and counts outside 0–15 are rejected. Valid zero counts still
+use the bounded boot retry path. This does not bypass module discovery.
+
+The on-device stack position (e.g. Module #2) is not automatically the zero-based
+USB spectrometer channel. Module serial numbers are read from EEPROM; no serial
+or firmware values from photographs are hard-coded into the driver.

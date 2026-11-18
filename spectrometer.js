@@ -1,6 +1,6 @@
-import { JazSpectrometer } from './jaz.js?v=jaz-boot-2';
-import { OceanOBPSpectrometer } from './ocean-obp.js?v=jaz-boot-2';
-import { USB4000Spectrometer } from './usb4000.js?v=jaz-boot-2';
+import { JazSpectrometer } from './jaz.js?v=jaz-echo-3';
+import { OceanOBPSpectrometer } from './ocean-obp.js?v=jaz-echo-3';
+import { USB4000Spectrometer } from './usb4000.js?v=jaz-echo-3';
 
 /** Choose protocol after the vendor-only chooser, before sending any commands. */
 export function createSpectrometerForDevice(device, options = {}) {

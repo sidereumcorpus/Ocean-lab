@@ -1,10 +1,10 @@
-import { SpectroscopySession, signalCounts, usesOpticalDark } from './spectroscopy.js?v=jaz-boot-2';
+import { SpectroscopySession, signalCounts, usesOpticalDark } from './spectroscopy.js?v=jaz-echo-3';
 import { initializeWorkspace } from "./ui.js";
-import { selectSpectrometer } from "./spectrometer.js?v=jaz-boot-2";
-import { DatasetPanel, downloadFile } from "./dataset-ui.js?v=jaz-boot-2";
-import { datasetCSV } from "./datasets.js?v=jaz-boot-2";
-import { gridSignature, alignGrid } from "./calibration.js?v=jaz-boot-2";
-import { CalibrationPanel } from "./calibration-ui.js?v=jaz-boot-2";
+import { selectSpectrometer } from "./spectrometer.js?v=jaz-echo-3";
+import { DatasetPanel, downloadFile } from "./dataset-ui.js?v=jaz-echo-3";
+import { datasetCSV } from "./datasets.js?v=jaz-echo-3";
+import { gridSignature, alignGrid } from "./calibration.js?v=jaz-echo-3";
+import { CalibrationPanel } from "./calibration-ui.js?v=jaz-echo-3";
 
 const $ = id => document.getElementById(id);
 const state = {

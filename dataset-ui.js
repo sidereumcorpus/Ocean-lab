@@ -1,4 +1,4 @@
-import { DatasetStore, MAX_FRAMES, framePeak, encodeBackup, decodeBackup, datasetCSV } from './datasets.js?v=jaz-boot-2';
+import { DatasetStore, MAX_FRAMES, framePeak, encodeBackup, decodeBackup, datasetCSV } from './datasets.js?v=jaz-echo-3';
 const $=id=>document.getElementById(id);
 export function downloadFile(name,content,type) {
   const url=URL.createObjectURL(new Blob([content],{type}));

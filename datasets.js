@@ -1,4 +1,4 @@
-import { validateCalibration } from './calibration.js?v=jaz-boot-2';
+import { validateCalibration } from './calibration.js?v=jaz-echo-3';
 /** Local, dependency-free dataset storage and portable file formats. */
 export const MAX_FRAMES = 2000;
 const MAX_PIXELS = 32768;

@@ -1,4 +1,4 @@
-import { USB4000Spectrometer } from './usb4000.js?v=jaz-boot-2';
+import { USB4000Spectrometer } from './usb4000.js?v=jaz-echo-3';
 
 /** Ocean Optics Jaz USB, VID 2457 / PID 2000.
  * Shares the legacy session queue, bounded reads and EEPROM helpers, NOT the
@@ -11,6 +11,10 @@ export class JazSpectrometer extends USB4000Spectrometer {
   constructor(options = {}) {
     super(options);
     this.onStatus=null;
+    this.countReplyTimeoutMs=options.jazCountReplyTimeoutMs??2000;
+    if(!Number.isInteger(this.countReplyTimeoutMs)||this.countReplyTimeoutMs<1||this.countReplyTimeoutMs>5000) {
+      throw new RangeError("Invalid Jaz module-count reply timeout.");
+    }
     this.startupAttempts=options.jazStartupAttempts??20;
     this.startupRetryMs=options.jazStartupRetryMs??500;
     if(!Number.isInteger(this.startupAttempts)||this.startupAttempts<1||this.startupAttempts>20||
@@ -34,17 +38,37 @@ export class JazSpectrometer extends USB4000Spectrometer {
 
   integrationStep(microseconds) { return JazSpectrometer.integrationStep(microseconds); }
 
+  /** OEM table describes one data byte. Some observed replies begin with the
+   * command byte C0. Accept only [count] or [C0,count]; USB transfer boundaries
+   * do not define response boundaries. Never interpret C0 as 192 modules.
+   */
+  async _moduleCount(session) {
+    await this._write(session,Uint8Array.of(0xc0));
+    const first=(await this._readBytes(session,1,1))[0];
+    let count=first;
+    if(first===0xc0) {
+      this.onStatus?.('Jaz echoed 0xC0; waiting for the module-count data byte.');
+      let timer;
+      const deadline=new Promise((_,reject)=>{
+        timer=setTimeout(()=>reject(new Error('Jaz replied with echo 0xc0 but no module-count data followed. This may be an unsupported firmware reply format; copy this error and the module firmware numbers.')),this.countReplyTimeoutMs);
+      });
+      try {
+        count=(await this._withCancellation(Promise.race([this._readBytes(session,1,1),deadline])))[0];
+      } finally {clearTimeout(timer);}
+    }
+    const hex='0x'+count.toString(16).padStart(2,'0');
+    if(this._buffers.get(1)?.length)throw new Error('Unexpected Jaz module-count reply length (prefix '+(first===0xc0?'0xc0 ':'')+hex+'). Copy this error.');
+    if(count>15)throw new Error('Unexpected Jaz module-count reply '+hex+' ('+count+')'+(first===0xc0?' after echo 0xc0':'')+'. Copy this error and the module firmware numbers.');
+    return count;
+  }
+
   async _initializeDevice(session) {
     // Query count BEFORE legacy module commands: a stack without a spectrometer
     // makes those commands undefined. Do not send USB4000 FE or trigger 0A.
     let count=0;
     for(let attempt=1;attempt<=this.startupAttempts;attempt++) {
       this._checkSession(session);
-      await this._write(session,Uint8Array.of(0xc0));
-      count=(await this._readBytes(session,1,1))[0];
-      const hex='0x'+count.toString(16).padStart(2,'0');
-      if(this._buffers.get(1)?.length)throw new Error('Unexpected Jaz module-count reply length (first byte '+hex+'). Reconnect after Jaz reaches its menu screen.');
-      if(count>15)throw new Error('Unexpected Jaz module-count reply '+hex+' ('+count+'). Close other spectrometer software, wait for the Jaz menu screen, then reconnect.');
+      count=await this._moduleCount(session);
       if(count>0)break;
       if(attempt===this.startupAttempts) {
         throw new Error('Jaz module count stayed at 0x00 (0) after '+attempt+' queries. Wait for the Jaz menu screen, check its approved power supply, then reconnect.');
